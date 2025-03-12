@@ -178,7 +178,7 @@ var_assign: IDENTIFIER group_or_list assign_op variable_value
 show_statement: SHOW LPAREN expression RPAREN
 
 ?conditional_statement: checkif_statement SEMICOLON?
-                      | switch_statement
+                      | switch_statement SEMICOLON?
 
 ?loop_statement: each_statement SEMICOLON?
                | repeat_statement SEMICOLON? 
@@ -241,6 +241,13 @@ func_definition: FUNC IDENTIFIER LPAREN param RPAREN LBRACE function_prog RBRACE
 ?param_tail: COMMA IDENTIFIER param_tail
            | 
 
+throw_statement: THROW expression SEMICOLON
+
+?args: expression args_tail
+     | 
+?args_tail: COMMA expression args_tail
+          | 
+
 function_prog: ( declarations
                | var_assign SEMICOLON
                | expression SEMICOLON
@@ -249,34 +256,8 @@ function_prog: ( declarations
                | loop_func_statement
                | throw_statement )*
 
-throw_statement: THROW expression SEMICOLON
-
-?args: expression args_tail
-     | 
-?args_tail: COMMA expression args_tail
-          | 
-
-?conditional_func_statement: func_checkif_statement
-                           | func_switch_statement
-
-?loop_func_statement: each_func_statement
-                    | repeat_func_statement
-                    | do_repeat_func_statement
-
-each_func_statement: EACH LPAREN each_initialization expression SEMICOLON expression RPAREN LBRACE func_loop_block RBRACE SEMICOLON?
-
-repeat_func_statement: REPEAT LPAREN expression RPAREN LBRACE func_loop_block RBRACE SEMICOLON?
-
-do_repeat_func_statement: DO LBRACE func_loop_block RBRACE REPEAT LPAREN expression RPAREN SEMICOLON?
-
-func_loop_block: ( declarations
-                 | var_assign SEMICOLON
-                 | expression SEMICOLON
-                 | show_statement SEMICOLON
-                 | conditional_func_loop_statement
-                 | loop_func_statement
-                 | throw_statement
-                 | control_flow )*
+?conditional_func_statement: func_checkif_statement SEMICOLON?
+                           | func_switch_statement SEMICOLON?
 
 func_checkif_statement: CHECKIF LPAREN expression RPAREN LBRACE function_prog RBRACE func_recheck_statement func_otherwise_statement
 
@@ -296,14 +277,40 @@ func_switch_statement: SWITCH LPAREN expression RPAREN LBRACE CASE literals COLO
 control_flow: EXIT SEMICOLON
             | NEXT SEMICOLON
 
-conditional_func_loop_statement: func_loop_checkif_statement
-                                | func_loop_switch_statement
+?loop_func_statement: each_func_statement SEMICOLON?
+                    | repeat_func_statement SEMICOLON? 
+                    | do_repeat_func_statement SEMICOLON?
+
+each_func_statement: EACH LPAREN each_initialization expression SEMICOLON expression RPAREN LBRACE func_loop_block RBRACE SEMICOLON?
+
+repeat_func_statement: REPEAT LPAREN expression RPAREN LBRACE func_loop_block RBRACE SEMICOLON?
+
+do_repeat_func_statement: DO LBRACE func_loop_block RBRACE REPEAT LPAREN expression RPAREN SEMICOLON?
+
+func_loop_block: ( declarations
+                 | var_assign SEMICOLON
+                 | expression SEMICOLON
+                 | show_statement SEMICOLON
+                 | conditional_func_loop_statement
+                 | loop_func_statement
+                 | throw_statement
+                 | control_flow )*
+
+conditional_func_loop_statement: func_loop_checkif_statement SEMICOLON?
+                                | func_loop_switch_statement SEMICOLON?
 
 func_loop_checkif_statement: CHECKIF LPAREN expression RPAREN LBRACE func_loop_block RBRACE func_loop_recheck_statement func_loop_otherwise_statement
 func_loop_recheck_statement: RECHECK LPAREN expression RPAREN LBRACE func_loop_block RBRACE func_loop_recheck_statement
                            |
 func_loop_otherwise_statement: OTHERWISE LBRACE func_loop_block RBRACE
                              |
-func_loop_switch_statement: SWITCH LPAREN expression RPAREN LBRACE CASE literals COLON func_loop_block func_case_tail func_loop_switch_default RBRACE
+func_loop_switch_statement: SWITCH LPAREN expression RPAREN LBRACE CASE literals COLON func_loop_block func_loop_case_tail func_loop_switch_default RBRACE
+
+func_loop_case_tail: CASE literals COLON func_loop_block func_loop_case_tail
+                   |
+
 func_loop_switch_default: DEFAULT COLON func_loop_block 
                    | 
+
+terminator: SEMICOLON
+          | 
