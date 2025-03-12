@@ -1,7 +1,7 @@
 # syntax_analyzer.py
 
 import os
-from lark import Lark, UnexpectedToken, UnexpectedCharacters
+from lark import Lark, UnexpectedToken, UnexpectedCharacters, UnexpectedInput, UnexpectedEOF
 from .syntax_errors import process_syntax_error
 from .token_map import TOKEN_MAP
 
@@ -12,14 +12,13 @@ def analyze_syntax(code):
     try:
         parse_tree = parser.parse(code)
         return (True, parse_tree)
-    except (UnexpectedToken, UnexpectedCharacters) as ut:
-        # Pass the raw tokens without mapping here
+    except (UnexpectedToken, UnexpectedCharacters, UnexpectedEOF, UnexpectedInput) as ut:
         expected_tokens = list(ut.expected) if hasattr(ut, "expected") else []
         token_val = ut.token if hasattr(ut, "token") and ut.token is not None else None
         processed_error = process_syntax_error(
             str(ut),
-            ut.line,
-            ut.column,
+            ut.line if hasattr(ut, "line") else 0,
+            ut.column if hasattr(ut, "column") else 0,
             expected_tokens,
             token_val,
             code

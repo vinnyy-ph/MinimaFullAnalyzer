@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Alert, AlertTitle, Box, Typography, Tabs, Tab, useTheme } from '@mui/material';
 
+
 const Errors = ({ errors }) => {
   const theme = useTheme();
   const boxRef = useRef(null);
@@ -24,12 +25,12 @@ const Errors = ({ errors }) => {
     tabIndex === 0 ? lexicalErrors : tabIndex === 1 ? syntaxErrors : semanticErrors;
   const hasErrors = currentErrors.length > 0;
 
-  const arrowColor = hasErrors ? '#ff5555' : '#66ff66';
+  // Consistent color styling for errors or success
+  const errorColor = hasErrors ? '#ff5555' : '#66ff66';
   const alertTitleColor = hasErrors ? '#ff5555' : '#66ff66';
   const secondaryTextColor = hasErrors ? '#ffcccc' : '#ccffcc';
 
-  // Only render expected token categories if they exist separately.
-  // Otherwise, we rely on the preformatted raw message.
+  // Render expected token categories if present
   const renderExpectedCategories = (error) => {
     const { literals, keywords, symbols, others } = error;
     if (!literals?.length && !keywords?.length && !symbols?.length && !others?.length) {
@@ -67,6 +68,49 @@ const Errors = ({ errors }) => {
           </li>
         )}
       </ul>
+    );
+  };
+
+  // Helper to format each individual error
+  const renderErrorItem = (error) => {
+    let formattedMessage =
+      error.message && error.message !== 'Error' ? error.message : 'Error';
+
+    if (error.line && error.column) {
+      formattedMessage += ` (Line ${error.line}, Col ${error.column})`;
+    }
+
+    return (
+      <li key={formattedMessage} style={{ marginBottom: '1rem' }}>
+        {/* Bullet + Main Error Message */}
+        <Typography
+          variant="body1"
+          component="div"
+          sx={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
+          }}
+        >
+          <span style={{ color: errorColor, marginRight: '8px', marginTop: '3px' }}>•</span>
+          <span>{formattedMessage}</span>
+        </Typography>
+
+        {/* Unexpected tokens / expected tokens */}
+        {error.unexpected && (
+          <Box sx={{ marginLeft: '24px' }}>
+            <Typography variant="body2" sx={{ color: secondaryTextColor }}>
+              <span style={{ color: errorColor, marginRight: '8px' }}>•</span>
+              Unexpected token: {error.unexpected}
+            </Typography>
+            <Typography variant="body2" sx={{ color: secondaryTextColor }}>
+              <span style={{ color: errorColor, marginRight: '8px' }}>•</span>
+              Expected tokens:
+            </Typography>
+            <Box sx={{ marginLeft: '24px' }}>{renderExpectedCategories(error)}</Box>
+          </Box>
+        )}
+      </li>
     );
   };
 
@@ -136,53 +180,7 @@ const Errors = ({ errors }) => {
 
         {hasErrors ? (
           <ul style={{ listStyleType: 'none', paddingLeft: 0, margin: 0 }}>
-            {currentErrors.map((error, index) => {
-              let formattedMessage = (error.message && error.message !== 'Error')
-                ? error.message
-                : 'Error';
-              if (error.line && error.column) {
-                formattedMessage += ` (Line ${error.line}, Col ${error.column})`;
-              }
-              return (
-                <li key={index} style={{ marginBottom: '0.5rem' }}>
-                  <pre
-                    style={{
-                      whiteSpace: 'pre-wrap',
-                      fontFamily:
-                        'Menlo, Monaco, Consolas, "Courier New", monospace',
-                      margin: 0,
-                    }}
-                  >
-                    <Typography variant="body1" component="span">
-                      <span style={{ color: arrowColor, marginRight: '8px' }}>➜</span>
-                      {formattedMessage}
-                    </Typography>
-                    <Typography
-                      variant="caption"
-                      component="div"
-                      sx={{ marginLeft: '16px', color: secondaryTextColor }}
-                    >
-                    </Typography>
-                  </pre>
-                  {error.unexpected && (
-                    <Typography
-                      variant="body2"
-                      sx={{
-                        marginLeft: '16px',
-                        fontSize: '1rem',
-                        color: secondaryTextColor,
-                      }}
-                    >
-                      <span style={{ color: arrowColor, marginRight: '8px' }}>•</span>
-                      Unexpected token: {error.unexpected} <br />
-                      <span style={{ color: arrowColor, marginRight: '8px' }}>•</span>
-                      Expected tokens: <br />
-                      {renderExpectedCategories(error)}
-                    </Typography>
-                  )}
-                </li>
-              );
-            })}
+            {currentErrors.map(renderErrorItem)}
           </ul>
         ) : (
           <Typography variant="body2" sx={{ color: secondaryTextColor }}>
@@ -197,4 +195,3 @@ const Errors = ({ errors }) => {
 };
 
 export default Errors;
-

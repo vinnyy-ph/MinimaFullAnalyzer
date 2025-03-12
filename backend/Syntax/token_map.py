@@ -1,5 +1,6 @@
 TOKEN_MAP = {
     "$END": "end of input",
+    "$EOF": "end of file",
     "LPAREN": "(",
     "RPAREN": ")",
     "LSQB": "[",

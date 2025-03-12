@@ -65,24 +65,25 @@ def process_syntax_error(
                 others_cat.append(token_str)
         return keywords_cat, literals_cat, symbols_cat, others_cat
 
-    missing = find_last_unmatched_bracket(line_fragment)
-    if missing is not None:
-        final_message = f"Syntax error at line {line}, column {column}: missing {missing}"
-        keywords_cat, literals_cat, symbols_cat, others_cat = categorize_tokens([missing])
-        return {
-            "message": final_message,
-            "rawMessage": error_msg,
-            "expected": [missing],
-            "unexpected": unexpected_token,
-            "line": line,
-            "column": column,
-            "value": "",
-            "type": "syntax",
-            "keywords": keywords_cat,
-            "literals": literals_cat,
-            "symbols": symbols_cat,
-            "others": others_cat
-        }
+    # Omit missing bracket error output by not checking for unmatched brackets.
+    # missing = find_last_unmatched_bracket(line_fragment)
+    # if missing is not None:
+    #     final_message = f"Syntax error at line {line}, column {column}: missing {missing}"
+    #     keywords_cat, literals_cat, symbols_cat, others_cat = categorize_tokens([missing])
+    #     return {
+    #         "message": final_message,
+    #         "rawMessage": error_msg,
+    #         "expected": [missing],
+    #         "unexpected": unexpected_token,
+    #         "line": line,
+    #         "column": column,
+    #         "value": "",
+    #         "type": "syntax",
+    #         "keywords": keywords_cat,
+    #         "literals": literals_cat,
+    #         "symbols": symbols_cat,
+    #         "others": others_cat
+    #     }
 
     # Map the unexpected token if available.
     if unexpected_token is not None:
@@ -140,10 +141,9 @@ def process_syntax_error(
     keywords_cat, literals_cat, symbols_cat, others_cat = categorize_tokens(mapped_expected)
 
     # 3) Build the error message
-    expected_lines = "\n".join(f"     {t}" for t in mapped_expected)
     final_message = (
-        f"Syntax error at line {line}, column {column}.\n"
-
+        # f"Syntax error at line {line}, column {column}.\n"
+        f"Syntax error \n"
     )
 
     return {
