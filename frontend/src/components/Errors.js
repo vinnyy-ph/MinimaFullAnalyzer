@@ -137,8 +137,12 @@ const Errors = ({ errors }) => {
         {hasErrors ? (
           <ul style={{ listStyleType: 'none', paddingLeft: 0, margin: 0 }}>
             {currentErrors.map((error, index) => {
-              // For syntax errors, prefer the rawMessage to preserve formatting.
-              const formattedMessage = error.message || 'Error';       
+              let formattedMessage = (error.message && error.message !== 'Error')
+                ? error.message
+                : 'Error';
+              if (error.line && error.column) {
+                formattedMessage += ` (Line ${error.line}, Col ${error.column})`;
+              }
               return (
                 <li key={index} style={{ marginBottom: '0.5rem' }}>
                   <pre
@@ -174,7 +178,6 @@ const Errors = ({ errors }) => {
                       <span style={{ color: arrowColor, marginRight: '8px' }}>•</span>
                       Expected tokens: <br />
                       {renderExpectedCategories(error)}
-                    
                     </Typography>
                   )}
                 </li>
@@ -183,7 +186,9 @@ const Errors = ({ errors }) => {
           </ul>
         ) : (
           <Typography variant="body2" sx={{ color: secondaryTextColor }}>
-            No errors detected in this category.
+            {tabIndex === 2 && syntaxErrors.length > 0
+              ? 'Syntax errors detected. Resolve them before semantic analysis.'
+              : 'No errors detected in this category.'}
           </Typography>
         )}
       </Alert>
@@ -192,3 +197,4 @@ const Errors = ({ errors }) => {
 };
 
 export default Errors;
+
