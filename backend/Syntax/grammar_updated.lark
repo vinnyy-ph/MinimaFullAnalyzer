@@ -1,0 +1,148 @@
+%import common.WS
+%ignore WS
+%ignore /\n/
+%ignore /#.*/
+
+LBRACE: "{"
+RBRACE: "}"
+LSQB: "["
+RSQB: "]"
+LPAREN: "("
+RPAREN: ")"
+
+VAR: "var"
+FIXED: "fixed"
+GROUP: "group"
+GET: "get"
+THROW: "throw"
+SHOW: "show"
+CHECKIF: "checkif"
+RECHECK: "recheck"
+OTHERWISE: "otherwise"
+SWITCH: "switch"
+CASE: "case"
+DEFAULT: "default"
+EXIT: "exit"
+NEXT: "next"
+EACH: "each"
+REPEAT: "repeat"
+DO: "do"
+EMPTY: "empty"
+FUNC: "func"
+
+OR_OP: "||"
+AND_OP: "&&"
+EQ_OP: "=="
+NEQ_OP: "!="
+LT: "<"
+LE: "<="
+GT: ">"
+GE: ">="
+
+PLUS: "+"
+MINUS: "-"
+STAR: "*"
+SLASH: "/"
+PERCENT: "%"
+
+BANG: "!"
+TILDE: "~"
+INC_OP: "++"
+DEC_OP: "--"
+
+ASSIGN: "="
+ADD_ASSIGN: "+="
+SUB_ASSIGN: "-="
+MUL_ASSIGN: "*="
+DIV_ASSIGN: "/="
+
+COMMA: ","
+COLON: ":"
+SEMICOLON: ";"
+
+INTEGER: "integer"
+POINT: "point"
+STATE: "state"
+TEXT: "text"
+
+IDENTIFIER: /(?!(?:var|fixed|group|func|throw|show|checkif|recheck|otherwise|switch|case|default|exit|next|each|repeat|do|integer|point|state|text|empty|get)(?![a-zA-Z0-9_]))[a-z][a-zA-Z0-9_]*/
+INTEGERLITERAL: /[0-9]{1,9}/
+POINTLITERAL: /[0-9]{1,9}\.[0-9]{1,9}/
+NEGINTEGERLITERAL: /~[0-9]{1,9}/
+NEGPOINTLITERAL: /~[0-9]{1,9}\.[0-9]{1,9}/
+TEXTLITERAL: /"[^"]*"/
+STATELITERAL: "YES" | "NO"
+
+?start: program
+
+?program: (declarations | func_definition | statements)*
+
+declarations: varlist_declaration | fixed_declaration | group_declaration
+
+varlist_declaration: VAR IDENTIFIER var_init varlist_tail SEMICOLON
+varlist_tail: COMMA IDENTIFIER var_init varlist_tail |
+
+fixed_declaration: FIXED IDENTIFIER = variable_value fixed_tail SEMICOLON
+fixed_tail: COMMA IDENTIFIER = variable_value fixed_tail |
+
+group_declaration: GROUP IDENTIFIER LBRACE group_members RBRACE SEMICOLON
+group_members: expression : expression member_tail
+member_tail: COMMA group_members |
+
+var_init: ASSIGN variable_value | 
+variable_value: [list_value] | expression | get LPAREN expression RPAREN
+
+list_value: expression list_tail
+list_tail: COMMA expression list_tail |
+
+id_usage: IDENTIFIER id_usage_tail
+id_usage_tail: group_or_list unary_op | func_call
+func_call: LAPREN args RPAREN
+group_or_list : LSQB expression RSQB | LBRACE expression RBRACE |
+
+unary_op: INC_OP | DEC_OP | 
+
+assign_op: ASSIGN | ADD_ASSIGN | SUB_ASSIGN | MUL_ASSIGN | DIV_ASSIGN
+
+expression: logical_or_expr
+logical_or_expr: logical_and_expr logical_or_expr_tail
+logical_or_expr_tail: OR_OP logical_and_expr logical_or_expr_tail |
+logical_and_expr: equality_expr logical_and_expr_tail
+logical_and_expr_tail: AND_OP equality_expr logical_and_expr_tail |
+equality_expr: relational_expr equality_expr_tail
+equality_expr_tail: EQ_OP relational_expr equality_expr_tail | NEQ_OP relational_expr equality_expr_tail |
+relational_expr: add_expr relational_expr_tail
+relational_expr_tail: LT add_expr relational_expr_tail | LE add_expr relational_expr_tail | GT add_expr relational_expr_tail | GE add_expr relational_expr_tail |
+add_expr: mul_expr add_expr_tail
+add_expr_tail: PLUS mul_expr add_expr_tail | MINUS mul_expr add_expr_tail |
+mul_expr: pre_expr mul_expr_tail
+mul_expr_tail: STAR pre_expr mul_expr_tail | SLASH pre_expr mul_expr_tail | PERCENT pre_expr mul_expr_tail |
+pre_expr: BANG pre_expr | TILDE pre_expr | primary_expr
+primary_expr: LPAREN expression RPAREN | operand
+operand: literals | typecast_expression | id_usage
+
+literals: TEXTLITERAL | INTEGERLITERAL | NEGINTEGERLITERAL | POINTLITERAL | NEGPOINTLITERAL | STATELITERAL | EMPTY
+typecast_expression: data_type LPAREN expression RPAREN
+data_type: INTEGER | POINT | STATE | TEXT | EMPTY
+
+func_definition: FUNC IDENTIFIER LPAREN param RPAREN LBRACE function_prog RBRACE
+function_prog: declarations function_prog 
+                | throw_statement function_prog
+                | var_assign SEMICOLON function_prog
+                | expression SEMICOLON function_prog
+                | show_statement SEMICOLON function_prog
+                | conditional_func_statement function_prog
+                | loop_func_statement function_prog
+                |
+loop_func_statement: func_each_statement
+                    | func_repeat_statement
+                    | func_do_repeat_statement
+
+func_each_statement: EACH LPAREN expression RPAREN LBRACE func_loop_block RBRACE
+func_repeat_statement: REPEAT LPAREN expression RPAREN LBRACE func_loop_block RBRACE
+func_do_repeat_statement: DO LBRACE func_loop_block RBRACE REPEAT LPAREN expression RPAREN SEMICOLON
+
+func_loop_block: declarations func_loop_block
+                | var_assign SEMICOLON func_loop_block
+                | expression SEMICOLON func_loop_block
+                | show_statement SEMICOLON func_loop_block
