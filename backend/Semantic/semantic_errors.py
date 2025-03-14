@@ -82,3 +82,13 @@ class ListIndexOutOfRangeError(SemanticError):
     def __init__(self, identifier, index, line=None, column=None):
         message = f"Error: list index {index} out of range for variable '{identifier}'"
         super().__init__(message, line, column)
+
+class KeyError(SemanticError):
+    def __init__(self, group_name, key, line=None, column=None):
+        message = f"Key '{key}' not found in group '{group_name}'"
+        super().__init__(message, line, column)
+
+class InvalidListOperandError(SemanticError):
+    def __init__(self, operator, line=None, column=None):
+        message = f"Operator '{operator}' not allowed with list operand"
+        super().__init__(message, line, column)

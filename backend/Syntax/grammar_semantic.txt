@@ -99,7 +99,7 @@ var_init: ASSIGN variable_value
 
 variable_value: LSQB list_value RSQB
               | expression
-              | GET LPAREN get_operand RPAREN
+
 
 get_operand: expression
            |
@@ -159,7 +159,8 @@ assign_op: ASSIGN
 ?operand: literals
         | typecast_expression
         | id_usage
-
+        | GET LPAREN get_operand RPAREN
+        
 ?literals: TEXTLITERAL
          | INTEGERLITERAL
          | NEGINTEGERLITERAL
@@ -202,7 +203,7 @@ switch_statement: SWITCH LPAREN expression RPAREN LBRACE CASE literals COLON pro
 ?default: DEFAULT COLON program
         | 
 
-each_statement: EACH LPAREN each_initialization expression SEMICOLON expression RPAREN LBRACE loop_block RBRACE
+each_statement: EACH LPAREN each_initialization expression SEMICOLON (expression | var_assign) RPAREN LBRACE loop_block RBRACE
 
 repeat_statement: REPEAT LPAREN expression RPAREN LBRACE loop_block RBRACE SEMICOLON?
 

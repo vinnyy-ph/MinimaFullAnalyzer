@@ -2,6 +2,7 @@ import re
 from lark import Visitor
 from .symbol_table import SymbolTable
 from .semantic_errors import (
+    InvalidListOperandError,
     ListIndexOutOfRangeError,
     SemanticError,
     FunctionRedefinedError,
@@ -302,18 +303,21 @@ class SemanticAnalyzer(Visitor):
         left and right are tuples: (type, value)
         Returns a tuple (result_type, result_value)
         """
-        # New check for list addition.
-        if op == "+":
-            if left[0] == "list" or right[0] == "list":
+        # New list operand checks.
+        if left[0] == "list" or right[0] == "list":
+            if op == "+":
                 if left[0] == "list" and right[0] == "list":
                     # Valid: concatenate lists.
                     return ("list", left[1] + right[1])
                 else:
-                    # Error: cannot add a list to a non-list.
-                    self.errors.append(SemanticError("Operator '+' not allowed between a list and a non-list", 0, 0))
+                    self.errors.append(SemanticError(
+                        "Operator '+' not allowed between a list and a non-list", 0, 0))
                     return ("unknown", None)
+            else:
+                self.errors.append(InvalidListOperandError(op, 0, 0))
+                return ("unknown", None)
         
-        # Existing text concatenation branch.
+        # For non-list type operands, handle text concatenation.
         if op == "+" and (left[0] == "text" or right[0] == "text"):
             return ("text", str(left[1]) + str(right[1]))
         
@@ -355,7 +359,7 @@ class SemanticAnalyzer(Visitor):
             self.errors.append(SemanticError(
                 f"Error evaluating expression: {str(e)}", 0, 0))
             return ("unknown", None)
-
+        
         # Determine result type.
         if use_point:
             return ("point", result)
@@ -826,8 +830,14 @@ class SemanticAnalyzer(Visitor):
                     self.errors.append(InvalidGroupAccessError(
                         name, line, column))
         
-        # Check assignment operator
-        op = children[2].value
+        # Extract the assignment operator - FIX HERE
+        assign_op_node = children[2]
+        if hasattr(assign_op_node, 'data'):
+            # It's a Tree node (e.g., assign_op), extract the token from its children
+            op = assign_op_node.children[0].value
+        else:
+            # It's a token directly (shouldn't happen with this grammar)
+            op = assign_op_node.value
         
         # For non-simple assignments, verify variable type is compatible
         if op != "=" and not has_accessor:
@@ -838,7 +848,8 @@ class SemanticAnalyzer(Visitor):
                 if var_type not in ["integer", "point", "text"]:
                     self.errors.append(SemanticError(
                         f"Operator '{op}' not applicable to variable of type '{var_type}'", 
-                        children[2].line, children[2].column))
+                        children[2].children[0].line if hasattr(children[2], 'children') else 0,
+                        children[2].children[0].column if hasattr(children[2], 'children') else 0))
         
         # Get the value being assigned
         literal_node = self.extract_literal(children[3])
@@ -857,7 +868,7 @@ class SemanticAnalyzer(Visitor):
         line = ident.line
         column = ident.column
         name = ident.value
-    
+
         # Check if this is a function call.
         if len(children) > 1 and hasattr(children[1], 'data') and children[1].data == "func_call":
             func_symbol = self.global_scope.lookup_function(name)
@@ -866,12 +877,25 @@ class SemanticAnalyzer(Visitor):
                     f"Function '{name}' is not defined", line, column))
             else:
                 expected = len(func_symbol.params)
+                # Visit the function call node to evaluate args
                 self.visit(children[1])
-                provided = len(self.get_value(children[1])) if id(children[1]) in self.values else 0
+                # Get the arguments from func_call node
+                func_call_node = children[1]
+                provided = 0
+                
+                # Check if there are arguments in the function call
+                if len(func_call_node.children) > 1:
+                    args_node = func_call_node.children[1]
+                    if hasattr(args_node, 'data') and args_node.data == 'args':
+                        # Count expressions in args, skipping commas
+                        provided = sum(1 for child in args_node.children if not (hasattr(child, 'type') and child.type == "COMMA"))
+                    elif hasattr(args_node, 'data') or hasattr(args_node, 'type'):
+                        # If there's a single argument and it's not a comma
+                        provided = 1
+                
                 if expected != provided:
-                    self.errors.append(SemanticError(
-                        f"Function '{name}' expects {expected} argument(s), but {provided} were provided",
-                        line, column))
+                    self.errors.append(ParameterMismatchError(
+                        name, expected, provided, line, column))
             result = ("unknown", None)
         else:
             symbol = self.current_scope.lookup_variable(name)
@@ -881,20 +905,27 @@ class SemanticAnalyzer(Visitor):
                 result = ("unknown", None)
             else:
                 result = getattr(symbol, "value", ("empty", None))
-    
-            # Instead of checking the accessor type here (which causes duplicates),
-            # delegate group or list access handling to visit_group_or_list.
+
+            # Check for group or list access and update result with the access result
             for child in children[1:]:
                 if hasattr(child, "data"):
                     if child.data == "id_usagetail":
                         for subchild in child.children:
                             if hasattr(subchild, "data") and subchild.data == "group_or_list" and subchild.children:
                                 subchild.parent = node  # ensure parent is set for error reporting in visit_group_or_list
-                                self.visit(subchild)
+                                # Visit the subchild to get the group/list element
+                                access_result = self.visit(subchild)
+                                # Update result with the access result if not None
+                                if access_result is not None:
+                                    result = access_result
                     elif child.data == "group_or_list" and child.children:
                         child.parent = node
-                        self.visit(child)
-    
+                        # Visit the child to get the group/list element
+                        access_result = self.visit(child)
+                        # Update result with the access result if not None
+                        if access_result is not None:
+                            result = access_result
+
         self.values[id(node)] = result
         return result
 
@@ -1043,14 +1074,27 @@ class SemanticAnalyzer(Visitor):
         """
         Helper method to handle a variable declaration with a get() operation.
         """
-        prompt_value = prompt[1] if isinstance(prompt, tuple) and len(prompt) > 1 else "Enter a value"
+        # Extract the prompt text, regardless of the format of the prompt parameter
+        prompt_text = "Enter a value"  # Default prompt
         
-        if self.current_function:
-            print(f"Declared variable {name} with user input and prompt \"{prompt_value}\" inside function {self.current_function}")
+        if isinstance(prompt, tuple):
+            if len(prompt) >= 2:
+                # If prompt is a tuple with at least two elements, use the second one
+                prompt_text = str(prompt[1])
+            elif len(prompt) == 1:
+                # Single-element tuple case
+                prompt_text = str(prompt[0])
         else:
-            print(f"Declared global variable {name} with user input and prompt \"{prompt_value}\"")
+            # Not a tuple case
+            prompt_text = str(prompt)
         
-        # Set a placeholder value since we can't know the actual input
+        # Print the declaration message with the extracted prompt text
+        if self.current_function:
+            print(f"Declared variable {name} with user input and prompt \"{prompt_text}\" inside function {self.current_function}")
+        else:
+            print(f"Declared global variable {name} with user input and prompt \"{prompt_text}\"")
+        
+        # Return a placeholder value since we can't know the actual input
         return ("unknown", None)
 
     def enter_loop(self):
@@ -1196,8 +1240,13 @@ class SemanticAnalyzer(Visitor):
         Semantic analysis for recheck_statement (else if).
         Syntax: RECHECK LPAREN expression RPAREN LBRACE program RBRACE recheck_statement
         """
+        children = node.children
+        # Check that the expected children exist; otherwise, skip processing.
+        if len(children) < 7:
+            return None
+    
         # Visit and validate the condition
-        condition_expr = node.children[2]
+        condition_expr = children[2]
         self.check_boolean_expr(condition_expr, "recheck condition")
         self.visit(condition_expr)
         
@@ -1205,14 +1254,14 @@ class SemanticAnalyzer(Visitor):
         self.push_scope()
         
         # Visit the else-if body
-        self.visit(node.children[5])
+        self.visit(children[5])
         
         # Pop scope
         self.pop_scope()
         
         # Visit nested recheck statement if present
-        if len(node.children) > 7 and node.children[7]:
-            self.visit(node.children[7])
+        if len(children) > 7 and children[7]:
+            self.visit(children[7])
         
         return None
 
@@ -1221,6 +1270,10 @@ class SemanticAnalyzer(Visitor):
         Semantic analysis for otherwise_statement (else).
         Syntax: OTHERWISE LBRACE program RBRACE
         """
+        # Check if the node has enough children before accessing them
+        if not node or not hasattr(node, 'children') or len(node.children) < 3:
+            return None
+        
         # Push scope for the else body
         self.push_scope()
         
@@ -1297,28 +1350,20 @@ class SemanticAnalyzer(Visitor):
             self.visit_case_values(case_tail_node.children[4], case_values)
 
     def visit_group_or_list(self, node):
-        """
-        Validate group or list access.
-        Syntax: 
-        LSQB expression RSQB (list access)
-        LBRACE expression RBRACE (group access)
-        """
         if not node.children:
             return None
 
-        # Check if this is list access or group access
+        # Determine if this is list access or group access
         is_list_access = node.children[0].type == "LSQB"
-
-        # Validate the index/key expression
+        # Evaluate the index/key expression
         index_expr = node.children[1]
-        self.visit(index_expr)
+        key_value = self.get_value(index_expr)
 
-        # We also need the parent id_usage to get the variable name
+        # Retrieve the parent id_usage to know which variable is being accessed
         parent = getattr(node, 'parent', None)
         if parent and hasattr(parent, 'data') and parent.data == 'id_usage':
             var_name = parent.children[0].value
             var_symbol = self.current_scope.lookup_variable(var_name)
-
             if var_symbol:
                 var_value = getattr(var_symbol, "value", None)
                 if var_value:
@@ -1329,27 +1374,53 @@ class SemanticAnalyzer(Visitor):
                             self.errors.append(InvalidListAccessError(
                                 var_name, parent.children[0].line, parent.children[0].column))
                         else:
-                            # Check that the list index is within range.
-                            index_val = self.get_value(index_expr)
-                            if index_val[0] == "integer":
-                                idx = index_val[1]
-                                list_items = var_value[1]
+                            # List index lookup
+                            list_items = var_value[1]
+                            if key_value[0] == "integer":
+                                idx = key_value[1]
                                 if idx < 0 or idx >= len(list_items):
                                     self.errors.append(ListIndexOutOfRangeError(
                                         var_name, idx,
                                         getattr(index_expr, 'line', 0),
                                         getattr(index_expr, 'column', 0)))
-                    else:
+                                    result = ("unknown", None)
+                                else:
+                                    result = list_items[idx]
+                                self.values[id(node)] = result
+                                return result
+                    else:  # Group access
                         if var_type != "group":
                             self.errors.append(InvalidGroupAccessError(
                                 var_name, parent.children[0].line, parent.children[0].column))
-        return None
+                        else:
+                            # For a group, look up the key in the group members
+                            group_members = var_value[1]  # List of (key, value) pairs
+                            result = None
+                            found = False
 
+                            for k, v in group_members:
+                                # Compare key types and values
+                                if k[0] == key_value[0] and k[1] == key_value[1]:
+                                    result = v
+                                    found = True
+                                    break
+
+                            if not found:
+                                self.errors.append(SemanticError(
+                                    f"Key '{key_value[1]}' not found in group '{var_name}'",
+                                    getattr(index_expr, 'line', 0),
+                                    getattr(index_expr, 'column', 0)))
+                                result = ("unknown", None)
+                            
+                            self.values[id(node)] = result
+                            return result
+        # In case of missing parent or variable, return the evaluated key.
+        self.values[id(node)] = key_value
+        return key_value
+
+    # In visit_group_declaration, replace the group declaration block with the following:
+    
     def visit_group_declaration(self, node):
-        """
-        Validate group declaration.
-        Syntax: GROUP IDENTIFIER LBRACE group_members RBRACE SEMICOLON
-        """
         ident = node.children[1]
         line = ident.line
         column = ident.column
@@ -1360,23 +1431,26 @@ class SemanticAnalyzer(Visitor):
                 f"Group '{name}' is already declared in this scope", line, column))
             return
         
-        # Create an empty group and initialize it
+        # Create a dict to track duplicate keys and a list to collect (key, value) pairs.
         group_data = {}
+        group_members = []
         
-        # Visit the group members to populate the group
-        self.visit_group_members(node.children[3], group_data)
+        # Pass both to visit_group_members.
+        self.visit_group_members(node.children[3], group_data, group_members)
         
-        # Store in symbol table
-        self.current_scope.variables[name].value = ("group", group_data)
+        # Save the group value as a list of key-value pairs.
+        self.current_scope.variables[name].value = ("group", group_members)
         
-        print(f"Declared group {name} with {len(group_data)} members")
+        # Print detailed information.
+        print(f"Declared group {name} with {len(group_members)} members:")
+        for key, value in group_members:
+            # key and value are tuples like ("integer", 2) or ("text", "pair")
+            print(f"{key[1]} ({key[0]}) : {value[1]} ({value[0]})")
         return
-
-    def visit_group_members(self, node, group_data):
-        """
-        Helper to visit and collect group members.
-        Syntax: expression COLON expression member_tail
-        """
+    
+    # Now update visit_group_members to accept an extra parameter for the members list:
+    
+    def visit_group_members(self, node, group_data, group_members):
         if not node or not hasattr(node, 'children'):
             return
         
@@ -1390,34 +1464,31 @@ class SemanticAnalyzer(Visitor):
         # Only text, integer, and state can be keys
         if key[0] not in ["text", "integer", "state"]:
             self.errors.append(SemanticError(
-                f"Group key must be text, integer, or state, got {key[0]}", 
+                f"Group key must be text, integer, or state, got {key[0]}",
                 getattr(key_expr, 'line', 0), getattr(key_expr, 'column', 0)))
         else:
-            # Store as string for the key
+            # Use the string representation for duplicate detection
             str_key = str(key[1])
             if str_key in group_data:
                 self.errors.append(SemanticError(
-                    f"Duplicate key '{str_key}' in group", 
+                    f"Duplicate key '{str_key}' in group",
                     getattr(key_expr, 'line', 0), getattr(key_expr, 'column', 0)))
             else:
-                group_data[str_key] = value
+                group_data[str_key] = True
+                group_members.append((key, value))
         
-        # Process member_tail if it exists
+        # Process member_tail if it exists.
         if len(node.children) > 3 and node.children[3]:
-            self.visit_member_tail(node.children[3], group_data)
-        
+            self.visit_member_tail(node.children[3], group_data, group_members)
         return
-
-    def visit_member_tail(self, node, group_data):
-        """
-        Helper to visit and collect additional group members.
-        Syntax: COMMA group_members
-        """
+    
+    # Finally update visit_member_tail accordingly:
+    
+    def visit_member_tail(self, node, group_data, group_members):
         if not node or not hasattr(node, 'children') or len(node.children) < 2:
             return
-        
-        # Visit nested group_members
-        self.visit_group_members(node.children[1], group_data)
+        # Visit the nested group_members.
+        self.visit_group_members(node.children[1], group_data, group_members)
         return
 
     # Function to visit the start rule
