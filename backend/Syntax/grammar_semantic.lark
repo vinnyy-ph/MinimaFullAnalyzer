@@ -169,7 +169,7 @@ assign_op: ASSIGN
          | STATELITERAL
          | EMPTY
 
-typecast_expression: (INTEGER | POINT | STATE | TEXT) LPAREN (expression | get_operand) RPAREN
+typecast_expression: (INTEGER | POINT | STATE | TEXT) LPAREN expression RPAREN
 
 ?statements: var_assign SEMICOLON
            | expression SEMICOLON

@@ -90,7 +90,7 @@ fixed_tail: COMMA IDENTIFIER ASSIGN variable_value fixed_tail
           | 
 
 group_declaration: GROUP IDENTIFIER LBRACE group_members RBRACE SEMICOLON?
-group_members: expression COLON expression member_tail
+group_members: expression COLON variable_value member_tail
 member_tail: COMMA group_members
            | 
 

@@ -92,3 +92,8 @@ class InvalidListOperandError(SemanticError):
     def __init__(self, operator, line=None, column=None):
         message = f"Operator '{operator}' not allowed with list operand"
         super().__init__(message, line, column)
+
+class TextIndexOutOfRangeError(SemanticError):
+    def __init__(self, identifier, index, line=None, column=None):
+        message = f"Error: text index {index} out of range for variable '{identifier}'"
+        super().__init__(message, line, column)

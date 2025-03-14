@@ -35,7 +35,6 @@ class SemanticAnalyzer(Visitor):
         self.errors = []  # List of SemanticError objects
         self.values = {}  # Store values for nodes
         self.current_function = None  # Track the current function name (if any)
-        self.current_function = None  # Track the current function name (if any)
         self.loop_depth = 0  # Track nested loop depth for exit/next validation
         self.switch_depth = 0  # Track nested switch depth
         self.in_loop_block = False  # Flag to indicate if we're in a loop block
@@ -262,12 +261,19 @@ class SemanticAnalyzer(Visitor):
         for child in node.children:
             if (hasattr(child, "data") and child.data == "group_or_list" and 
                 child.children and hasattr(child.children[0], "type")):
-                # Found list access, check if variable is a list
-                if child.children[0].type == "LSQB" and var_type != "list":
-                    # This is list access on a non-list!
+                # Found list access, check if variable is a list or text
+                if child.children[0].type == "LSQB" and var_type != "list" and var_type != "text":
+                    # This is list access on a non-list and non-text variable!
                     line = node.children[0].line if hasattr(node.children[0], "line") else 0
                     column = node.children[0].column if hasattr(node.children[0], "column") else 0
                     self.errors.append(InvalidListAccessError(var_name, line, column))
+                    return
+                # Check for group access on non-group
+                elif child.children[0].type == "LBRACE" and var_type != "group":
+                    # This is group access on a non-group!
+                    line = node.children[0].line if hasattr(node.children[0], "line") else 0
+                    column = node.children[0].column if hasattr(node.children[0], "column") else 0
+                    self.errors.append(InvalidGroupAccessError(var_name, line, column))
                     return
 
     def visit_list_value(self, node):
@@ -317,7 +323,21 @@ class SemanticAnalyzer(Visitor):
         Evaluate a binary arithmetic expression.
         left and right are tuples: (type, value)
         Returns a tuple (result_type, result_value)
+        Enhanced to track get operations.
         """
+        # Track get operations in the expression
+        has_gets = []
+        if left[0] == "get":
+            has_gets.append(left[1])
+        if right[0] == "get":
+            has_gets.append(right[1])
+
+        # If we found get operations, create a special result
+        if has_gets:
+            # For operations with get, we can't determine the actual value
+            # Return a special tuple marking this as a compound get operation
+            return ("compound_get", has_gets)
+
         # Check for empty operands
         if left[0] == "empty" or right[0] == "empty":
             self.errors.append(SemanticError(
@@ -693,8 +713,7 @@ class SemanticAnalyzer(Visitor):
         name = ident.value
         
         if not self.current_scope.define_variable(name, fixed=False, line=line, column=column):
-            self.errors.append(SemanticError(
-                f"Variable '{name}' is already declared in this scope", line, column))
+            self.errors.append(RedeclarationError(name, line, column))
             return
 
         if len(children) >= 3 and children[2] and not (hasattr(children[2], "type") and children[2].type == "SEMICOLON"):
@@ -702,17 +721,45 @@ class SemanticAnalyzer(Visitor):
             if literal_node is not None:
                 expr_value = self.get_value(literal_node)
                 
-                # Check if this is a get operation
-                if isinstance(expr_value, tuple) and len(expr_value) >= 1 and expr_value[0] == "get":
-                    # This is a get operation
-                    prompt = expr_value[1] if len(expr_value) > 1 else ("text", "Enter a value")
-                    self.current_scope.variables[name].value = self.handle_get_declaration(name, prompt)
-                else:
-                    # Normal case (not a get operation)
-                    if self.current_function:
-                        print(f"Declared variable {name} with expression value {expr_value[1]} and type {expr_value[0]} inside function {self.current_function}")
+                # Handle initialization based on expression type
+                if isinstance(expr_value, tuple) and len(expr_value) >= 1:
+                    if expr_value[0] == "get":
+                        # Single get operation
+                        prompt = expr_value[1]
+                        self.current_scope.variables[name].value = self.handle_get_declaration(name, prompt)
+                    elif expr_value[0] == "compound_get":
+                        # Multiple get operations in an expression
+                        prompts = expr_value[1]
+                        prompt_texts = []
+                        for p in prompts:
+                            if isinstance(p, tuple) and len(p) >= 2:
+                                prompt_texts.append(str(p[1]))
+                            else:
+                                prompt_texts.append("input")
+                        
+                        # Print message with multiple prompts
+                        prompt_count = len(prompts)
+                        prompts_str = " and ".join([f"'{pt}'" for pt in prompt_texts])
+                        
+                        if self.current_function:
+                            print(f"Declared variable {name} with {prompt_count} get inputs and prompts {prompts_str} inside function {self.current_function}")
+                        else:
+                            print(f"Declared global variable {name} with {prompt_count} get inputs and prompts {prompts_str}")
+                        
+                        self.current_scope.variables[name].value = ("unknown", None)
                     else:
-                        print(f"Declared global variable {name} with expression value {expr_value[1]} and type {expr_value[0]}")
+                        # Normal case (not a get operation)
+                        if self.current_function:
+                            print(f"Declared variable {name} with expression value {expr_value[1]} and type {expr_value[0]} inside function {self.current_function}")
+                        else:
+                            print(f"Declared global variable {name} with expression value {expr_value[1]} and type {expr_value[0]}")
+                        self.current_scope.variables[name].value = expr_value
+                else:
+                    # Handle non-tuple case
+                    if self.current_function:
+                        print(f"Declared variable {name} with expression value {expr_value} inside function {self.current_function}")
+                    else:
+                        print(f"Declared global variable {name} with expression value {expr_value}")
                     self.current_scope.variables[name].value = expr_value
             else:
                 if self.current_function:
@@ -740,25 +787,52 @@ class SemanticAnalyzer(Visitor):
         column = ident.column
         name = ident.value
         if not self.current_scope.define_variable(name, fixed=False, line=line, column=column):
-            self.errors.append(SemanticError(
-                f"Variable '{name}' is already declared in this scope", line, column))
+            self.errors.append(RedeclarationError(name, line, column))
             return
         if len(children) > 2 and children[2]:
             literal_node = self.extract_literal(children[2])
             if literal_node is not None:
                 expr_value = self.get_value(literal_node)
                 
-                # Check if this is a get operation
-                if isinstance(expr_value, tuple) and len(expr_value) >= 1 and expr_value[0] == "get":
-                    # This is a get operation
-                    prompt = expr_value[1] if len(expr_value) > 1 else ("text", "Enter a value")
-                    self.current_scope.variables[name].value = self.handle_get_declaration(name, prompt)
-                else:
-                    # Normal case
-                    if self.current_function:
-                        print(f"Declared variable {name} with expression value {expr_value[1]} and type {expr_value[0]} inside function {self.current_function}")
+                # Check if this is a single get operation or compound get operation
+                if isinstance(expr_value, tuple) and len(expr_value) >= 1:
+                    if expr_value[0] == "get":
+                        # Single get operation
+                        prompt = expr_value[1]
+                        self.current_scope.variables[name].value = self.handle_get_declaration(name, prompt)
+                    elif expr_value[0] == "compound_get":
+                        # Multiple get operations in an expression
+                        prompts = expr_value[1]
+                        prompt_texts = []
+                        for p in prompts:
+                            if isinstance(p, tuple) and len(p) >= 2:
+                                prompt_texts.append(str(p[1]))
+                            else:
+                                prompt_texts.append("input")
+                        
+                        # Print message with multiple prompts
+                        prompt_count = len(prompts)
+                        prompts_str = " and ".join([f"'{pt}'" for pt in prompt_texts])
+                        
+                        if self.current_function:
+                            print(f"Declared variable {name} with {prompt_count} get inputs and prompts {prompts_str} inside function {self.current_function}")
+                        else:
+                            print(f"Declared global variable {name} with {prompt_count} get inputs and prompts {prompts_str}")
+                        
+                        self.current_scope.variables[name].value = ("unknown", None)
                     else:
-                        print(f"Declared global variable {name} with expression value {expr_value[1]} and type {expr_value[0]}")
+                        # Normal case (not a get operation)
+                        if self.current_function:
+                            print(f"Declared variable {name} with expression value {expr_value[1]} and type {expr_value[0]} inside function {self.current_function}")
+                        else:
+                            print(f"Declared global variable {name} with expression value {expr_value[1]} and type {expr_value[0]}")
+                        self.current_scope.variables[name].value = expr_value
+                else:
+                    # Handle non-tuple case
+                    if self.current_function:
+                        print(f"Declared variable {name} with expression value {expr_value} inside function {self.current_function}")
+                    else:
+                        print(f"Declared global variable {name} with expression value {expr_value}")
                     self.current_scope.variables[name].value = expr_value
             else:
                 if self.current_function:
@@ -784,18 +858,53 @@ class SemanticAnalyzer(Visitor):
         column = ident.column
         name = ident.value
         if not self.current_scope.define_variable(name, fixed=True, line=line, column=column):
-            self.errors.append(SemanticError(
-                f"Fixed variable '{name}' is already declared in this scope", line, column))
+            self.errors.append(RedeclarationError(name, line, column))
             return
         if len(children) > 3 and children[3]:
             literal_node = self.extract_literal(children[3])
             if literal_node is not None:
                 expr_value = self.get_value(literal_node)
-                if self.current_function:
-                    print(f"Declared fixed variable {name} with expression value {expr_value[1]} and type {expr_value[0]} inside function {self.current_function}")
+                
+                # Check if this is a get operation (single or compound)
+                if isinstance(expr_value, tuple) and len(expr_value) >= 1:
+                    if expr_value[0] == "get":
+                        # Single get operation
+                        prompt = expr_value[1]
+                        self.current_scope.variables[name].value = self.handle_get_declaration(name, prompt)
+                    elif expr_value[0] == "compound_get":
+                        # Multiple get operations in an expression
+                        prompts = expr_value[1]
+                        prompt_texts = []
+                        for p in prompts:
+                            if isinstance(p, tuple) and len(p) >= 2:
+                                prompt_texts.append(str(p[1]))
+                            else:
+                                prompt_texts.append("input")
+                        
+                        # Print message with multiple prompts
+                        prompt_count = len(prompts)
+                        prompts_str = " and ".join([f"'{pt}'" for pt in prompt_texts])
+                        
+                        if self.current_function:
+                            print(f"Declared fixed variable {name} with {prompt_count} get inputs and prompts {prompts_str} inside function {self.current_function}")
+                        else:
+                            print(f"Declared global fixed variable {name} with {prompt_count} get inputs and prompts {prompts_str}")
+                        
+                        self.current_scope.variables[name].value = ("unknown", None)
+                    else:
+                        # Normal case (not a get operation)
+                        if self.current_function:
+                            print(f"Declared fixed variable {name} with expression value {expr_value[1]} and type {expr_value[0]} inside function {self.current_function}")
+                        else:
+                            print(f"Declared global fixed variable {name} with expression value {expr_value[1]} and type {expr_value[0]}")
+                        self.current_scope.variables[name].value = expr_value
                 else:
-                    print(f"Declared global fixed variable {name} with expression value {expr_value[1]} and type {expr_value[0]}")
-                self.current_scope.variables[name].value = expr_value
+                    # Handle non-tuple case
+                    if self.current_function:
+                        print(f"Declared fixed variable {name} with expression value {expr_value} inside function {self.current_function}")
+                    else:
+                        print(f"Declared global fixed variable {name} with expression value {expr_value}")
+                    self.current_scope.variables[name].value = expr_value
             else:
                 if self.current_function:
                     print(f"Declared fixed variable {name} with empty value inside function {self.current_function}")
@@ -819,18 +928,53 @@ class SemanticAnalyzer(Visitor):
         column = ident.column
         name = ident.value
         if not self.current_scope.define_variable(name, fixed=True, line=line, column=column):
-            self.errors.append(SemanticError(
-                f"Fixed variable '{name}' is already declared in this scope", line, column))
+            self.errors.append(RedeclarationError(name, line, column))
             return
         if len(children) > 3 and children[3]:
             literal_node = self.extract_literal(children[3])
             if literal_node is not None:
                 expr_value = self.get_value(literal_node)
-                if self.current_function:
-                    print(f"Declared fixed variable {name} with expression value {expr_value[1]} and type {expr_value[0]} inside function {self.current_function}")
+                
+                # Check if this is a get operation (single or compound)
+                if isinstance(expr_value, tuple) and len(expr_value) >= 1:
+                    if expr_value[0] == "get":
+                        # Single get operation
+                        prompt = expr_value[1]
+                        self.current_scope.variables[name].value = self.handle_get_declaration(name, prompt)
+                    elif expr_value[0] == "compound_get":
+                        # Multiple get operations in an expression
+                        prompts = expr_value[1]
+                        prompt_texts = []
+                        for p in prompts:
+                            if isinstance(p, tuple) and len(p) >= 2:
+                                prompt_texts.append(str(p[1]))
+                            else:
+                                prompt_texts.append("input")
+                        
+                        # Print message with multiple prompts
+                        prompt_count = len(prompts)
+                        prompts_str = " and ".join([f"'{pt}'" for pt in prompt_texts])
+                        
+                        if self.current_function:
+                            print(f"Declared fixed variable {name} with {prompt_count} get inputs and prompts {prompts_str} inside function {self.current_function}")
+                        else:
+                            print(f"Declared global fixed variable {name} with {prompt_count} get inputs and prompts {prompts_str}")
+                        
+                        self.current_scope.variables[name].value = ("unknown", None)
+                    else:
+                        # Normal case (not a get operation)
+                        if self.current_function:
+                            print(f"Declared fixed variable {name} with expression value {expr_value[1]} and type {expr_value[0]} inside function {self.current_function}")
+                        else:
+                            print(f"Declared global fixed variable {name} with expression value {expr_value[1]} and type {expr_value[0]}")
+                        self.current_scope.variables[name].value = expr_value
                 else:
-                    print(f"Declared global fixed variable {name} with expression value {expr_value[1]} and type {expr_value[0]}")
-                self.current_scope.variables[name].value = expr_value
+                    # Handle non-tuple case
+                    if self.current_function:
+                        print(f"Declared fixed variable {name} with expression value {expr_value} inside function {self.current_function}")
+                    else:
+                        print(f"Declared global fixed variable {name} with expression value {expr_value}")
+                    self.current_scope.variables[name].value = expr_value
             else:
                 if self.current_function:
                     print(f"Declared fixed variable {name} with empty value inside function {self.current_function}")
@@ -859,19 +1003,17 @@ class SemanticAnalyzer(Visitor):
         symbol = self.current_scope.lookup_variable(name)
         
         if symbol is None:
-            self.errors.append(SemanticError(
-                f"Variable '{name}' is not declared", line, column))
+            self.errors.append(UndefinedIdentifierError(name, line, column))
             return
         
         if symbol.fixed:
-            self.errors.append(SemanticError(
-                f"Fixed variable '{name}' cannot be reassigned", line, column))
+            self.errors.append(FixedVarReassignmentError(name, line, column))
             return
         
         # Check for list or group access
         has_accessor = False
         accessor_node = None
-        if children[1] and hasattr(children[1], 'children') and children[1].children:
+        if len(children) > 1 and children[1] and hasattr(children[1], 'children') and children[1].children:
             has_accessor = True
             accessor_node = children[1]
             
@@ -915,8 +1057,8 @@ class SemanticAnalyzer(Visitor):
                 if var_type not in ["integer", "point", "text"]:
                     self.errors.append(SemanticError(
                         f"Operator '{op}' not applicable to variable of type '{var_type}'", 
-                        children[2].children[0].line if hasattr(children[2], 'children') else 0,
-                        children[2].children[0].column if hasattr(children[2], 'children') else 0))
+                        assign_op_node.children[0].line if hasattr(assign_op_node, 'children') else 0,
+                        assign_op_node.children[0].column if hasattr(assign_op_node, 'children') else 0))
                     return  # Exit early as this is a type error
         
         # Get the value being assigned
@@ -1093,12 +1235,11 @@ class SemanticAnalyzer(Visitor):
         column = ident.column
         name = ident.value
 
-        # Check if this is a function call.
+        # Check if this is a function call
         if len(children) > 1 and hasattr(children[1], 'data') and children[1].data == "func_call":
             func_symbol = self.global_scope.lookup_function(name)
             if func_symbol is None:
-                self.errors.append(SemanticError(
-                    f"Function '{name}' is not defined", line, column))
+                self.errors.append(FunctionNotDefinedError(name, line, column))
             else:
                 expected = len(func_symbol.params)
                 # Visit the function call node to evaluate args
@@ -1124,8 +1265,7 @@ class SemanticAnalyzer(Visitor):
         else:
             symbol = self.current_scope.lookup_variable(name)
             if symbol is None:
-                self.errors.append(SemanticError(
-                    f"Variable '{name}' is not declared", line, column))
+                self.errors.append(UndefinedIdentifierError(name, line, column))
                 result = ("unknown", None)
             else:
                 result = getattr(symbol, "value", ("empty", None))
@@ -1252,6 +1392,30 @@ class SemanticAnalyzer(Visitor):
         self.visit(node.children[1])
         return None
 
+    def visit_show_statement(self, node):
+        """
+        Semantic analysis for show_statement.
+        Syntax: SHOW LPAREN expression RPAREN
+        """
+        # Visit the expression to evaluate it
+        expr = node.children[2]
+        expr_value = self.get_value(expr)
+        return None
+
+    def visit_control_flow(self, node):
+        """
+        Semantic analysis for control flow statements (EXIT, NEXT).
+        These should only be used inside loops.
+        """
+        stmt_token = node.children[0]
+        stmt_type = stmt_token.value.lower()  # "exit" or "next"
+        line = stmt_token.line
+        column = stmt_token.column
+        
+        if not self.in_loop_block:
+            self.errors.append(ControlFlowError(
+                stmt_type, "loops", line, column))
+        return None
 
     def visit_variable_value(self, node):
         """
@@ -1264,12 +1428,14 @@ class SemanticAnalyzer(Visitor):
             # This is a get operation
             # The get_operand is the 3rd child (after LPAREN)
             if len(children) >= 3:
-                prompt = self.get_value(children[2])
-                # Return a special tuple indicating this is a get operation with the prompt
-                result = ("get", prompt)
+                # Get the prompt expression
+                prompt_expr = self.get_value(children[2])
+                
+                # Create a special tuple indicating this is a get operation with the prompt
+                result = ("get", prompt_expr)
                 self.values[id(node)] = result
                 return result
-        
+            
         # Handle other cases by recursively visiting children
         if not children:
             result = ("empty", None)
@@ -1298,25 +1464,24 @@ class SemanticAnalyzer(Visitor):
         """
         Helper method to handle a variable declaration with a get() operation.
         """
-        # Extract the prompt text, regardless of the format of the prompt parameter
+        # Extract the prompt text from the prompt value
         prompt_text = "Enter a value"  # Default prompt
         
-        if isinstance(prompt, tuple):
-            if len(prompt) >= 2:
-                # If prompt is a tuple with at least two elements, use the second one
-                prompt_text = str(prompt[1])
-            elif len(prompt) == 1:
-                # Single-element tuple case
-                prompt_text = str(prompt[0])
-        else:
-            # Not a tuple case
-            prompt_text = str(prompt)
+        if isinstance(prompt, tuple) and len(prompt) >= 2:
+            # If prompt is a typed tuple like ("text", "enter input")
+            prompt_type, prompt_value = prompt
+            if prompt_type == "text" and isinstance(prompt_value, str):
+                # For text prompts, use the string directly
+                prompt_text = prompt_value
+            elif prompt_value is not None:
+                # For non-text prompts, convert to string
+                prompt_text = str(prompt_value)
         
         # Print the declaration message with the extracted prompt text
         if self.current_function:
-            print(f"Declared variable {name} with user input and prompt \"{prompt_text}\" inside function {self.current_function}")
+            print(f"Declared variable {name} with get input and prompt \"{prompt_text}\" inside function {self.current_function}")
         else:
-            print(f"Declared global variable {name} with user input and prompt \"{prompt_text}\"")
+            print(f"Declared global variable {name} with get input and prompt \"{prompt_text}\"")
         
         # Return a placeholder value since we can't know the actual input
         return ("unknown", None)
@@ -1441,6 +1606,7 @@ class SemanticAnalyzer(Visitor):
         # Visit and validate the condition
         condition_expr = node.children[2]
         self.check_boolean_expr(condition_expr, "checkif condition")
+        self.visit(condition_expr)
         
         # Push scope for the if body
         self.push_scope()
@@ -1546,10 +1712,13 @@ class SemanticAnalyzer(Visitor):
         return None
 
     def visit_case_values(self, case_tail_node, case_values):
-        """Helper to visit and track case values."""
         if not case_tail_node or not hasattr(case_tail_node, 'children'):
             return
         
+        # Check if there are at least 2 children.
+        if len(case_tail_node.children) < 2:
+            return
+    
         case_value = self.get_value(case_tail_node.children[1])
         if case_value and case_value[0] != "unknown":
             str_val = str(case_value)
@@ -1565,10 +1734,11 @@ class SemanticAnalyzer(Visitor):
             else:
                 case_values.add(str_val)
         
-        # Visit the case body
-        self.visit(case_tail_node.children[3])
+        # Visit the case body if it exists.
+        if len(case_tail_node.children) >= 4:
+            self.visit(case_tail_node.children[3])
         
-        # Process nested case_tail
+        # Process nested case_tail if available.
         if len(case_tail_node.children) > 4 and case_tail_node.children[4]:
             self.visit_case_values(case_tail_node.children[4], case_values)
 
@@ -1593,11 +1763,30 @@ class SemanticAnalyzer(Visitor):
                     var_type = var_value[0] if isinstance(var_value, tuple) else None
 
                     if is_list_access:
-                        if var_type != "list":
+                        # NEW CONDITION: Handle text indexing
+                        if var_type == "text":
+                            # Text character indexing
+                            text_value = var_value[1]
+                            if key_value[0] == "integer":
+                                idx = key_value[1]
+                                if idx < 0 or idx >= len(text_value):
+                                    # Get more accurate line and column information
+                                    line = getattr(index_expr, 'line', 0)
+                                    column = getattr(index_expr, 'column', 0)
+                                    self.errors.append(SemanticError(
+                                        f"Text index {idx} out of range for variable '{var_name}'", 
+                                        line, column))
+                                    result = ("unknown", None)
+                                else:
+                                    # Return the character at the specified index as a text type
+                                    result = ("text", text_value[idx])
+                                self.values[id(node)] = result
+                                return result
+                        elif var_type != "list":
                             self.errors.append(InvalidListAccessError(
                                 var_name, parent.children[0].line, parent.children[0].column))
                         else:
-                            # List index lookup
+                            # Existing list index lookup logic
                             list_items = var_value[1]
                             if key_value[0] == "integer":
                                 idx = key_value[1]
@@ -1613,6 +1802,7 @@ class SemanticAnalyzer(Visitor):
                                 self.values[id(node)] = result
                                 return result
                     else:  # Group access
+                        # Existing group access logic remains unchanged
                         if var_type != "group":
                             self.errors.append(InvalidGroupAccessError(
                                 var_name, parent.children[0].line, parent.children[0].column))
@@ -1654,8 +1844,7 @@ class SemanticAnalyzer(Visitor):
         name = ident.value
         
         if not self.current_scope.define_variable(name, fixed=False, line=line, column=column):
-            self.errors.append(SemanticError(
-                f"Group '{name}' is already declared in this scope", line, column))
+            self.errors.append(RedeclarationError(name, line, column))
             return
         
         # Create a dict to track duplicate keys and a list to collect (key, value) pairs.
@@ -1729,4 +1918,325 @@ class SemanticAnalyzer(Visitor):
         for child in node.children:
             self.visit(child)
         return None
+        
+    # Visit loop block - handles control flow statements in loops
+    def visit_loop_block(self, node):
+        for child in node.children:
+            self.visit(child)
+        return None
+        
+    # Visit each loop in functions
+    def visit_each_func_statement(self, node):
+        # Similar to visit_each_statement but in a function context
+        self.visit(node.children[2])
+        condition_expr = node.children[3]
+        self.check_boolean_expr(condition_expr, "each loop condition")
+        self.visit(condition_expr)
+        self.visit(node.children[5])
+        
+        self.push_scope()
+        self.enter_loop()
+        self.visit(node.children[7])  # func_loop_block
+        self.exit_loop()
+        self.pop_scope()
+        return None
+        
+    def visit_repeat_func_statement(self, node):
+        # Similar to visit_repeat_statement but in a function context
+        condition_expr = node.children[2]
+        self.check_boolean_expr(condition_expr, "repeat loop condition")
+        self.visit(condition_expr)
+        
+        self.push_scope()
+        self.enter_loop()
+        self.visit(node.children[4])  # func_loop_block
+        self.exit_loop()
+        self.pop_scope()
+        return None
+        
+    def visit_do_repeat_func_statement(self, node):
+        # Similar to visit_do_repeat_statement but in a function context
+        self.push_scope()
+        self.enter_loop()
+        self.visit(node.children[2])  # func_loop_block
+        
+        condition_expr = node.children[6]
+        self.check_boolean_expr(condition_expr, "do-repeat loop condition")
+        self.visit(condition_expr)
+        
+        self.exit_loop()
+        self.pop_scope()
+        return None
+        
+    def visit_func_loop_block(self, node):
+        # Similar to visit_loop_block but can include throw statements
+        for child in node.children:
+            self.visit(child)
+        return None
+        
+    # Handle conditional statements in loop contexts
+    def visit_loop_checkif_statement(self, node):
+        # Similar to visit_checkif_statement but in a loop context
+        condition_expr = node.children[2]
+        self.check_boolean_expr(condition_expr, "checkif condition")
+        self.visit(condition_expr)
+        
+        self.push_scope()
+        self.visit(node.children[5])  # loop_block
+        self.pop_scope()
+        
+        for child in node.children[6:]:
+            if child and hasattr(child, 'data'):
+                self.visit(child)
+        return None
+        
+    def visit_loop_recheck_statement(self, node):
+        # Similar to visit_recheck_statement but in a loop context
+        if not node or not hasattr(node, 'children') or len(node.children) < 7:
+            return None
+            
+        condition_expr = node.children[2]
+        self.check_boolean_expr(condition_expr, "recheck condition")
+        self.visit(condition_expr)
+        
+        self.push_scope()
+        self.visit(node.children[5])  # loop_block
+        self.pop_scope()
+        
+        if len(node.children) > 7 and node.children[7]:
+            self.visit(node.children[7])
+        return None
+        
+    def visit_loop_otherwise_statement(self, node):
+        # Similar to visit_otherwise_statement but in a loop context
+        if not node or not hasattr(node, 'children') or len(node.children) < 3:
+            return None
+        
+        self.push_scope()
+        self.visit(node.children[2])  # loop_block
+        self.pop_scope()
+        return None
+        
+    def visit_loop_switch_statement(self, node):
+        # Similar to visit_switch_statement but in a loop context
+        self.visit(node.children[2])  # expression
+        
+        self.push_scope()
+        self.enter_switch()
+        
+        case_values = set()
+        case_value = self.get_value(node.children[6])
+        if case_value and case_value[0] != "unknown":
+            case_values.add(str(case_value))
+        
+        self.visit(node.children[8])  # loop_block
+        
+        if len(node.children) > 9 and node.children[9]:
+            self.visit_case_tail_loop(node.children[9], case_values)
+        
+        if len(node.children) > 10 and node.children[10]:
+            self.visit(node.children[10])  # loop_switch_default
+        
+        self.exit_switch()
+        self.pop_scope()
+        return None
+        
+    def visit_case_tail_loop(self, node, case_values):
+        # Similar to visit_case_values but for loop context
+        if not node or not hasattr(node, 'children'):
+            return
+        
+        case_value = self.get_value(node.children[1])
+        if case_value and case_value[0] != "unknown":
+            str_val = str(case_value)
+            if str_val in case_values:
+                line = getattr(node.children[1], 'line', 0)
+                column = getattr(node.children[1], 'column', 0)
+                self.errors.append(SemanticError(
+                    f"Duplicate case value: {case_value[1]}", line, column))
+            else:
+                case_values.add(str_val)
+        
+        self.visit(node.children[3])  # loop_block
+        
+        if len(node.children) > 4 and node.children[4]:
+            self.visit_case_tail_loop(node.children[4], case_values)
+        return
 
+    # Handle conditional statements in function contexts
+    def visit_func_checkif_statement(self, node):
+        # Similar to visit_checkif_statement but in a function context
+        condition_expr = node.children[2]
+        self.check_boolean_expr(condition_expr, "checkif condition")
+        self.visit(condition_expr)
+        
+        self.push_scope()
+        self.visit(node.children[5])  # function_prog
+        self.pop_scope()
+        
+        for child in node.children[6:]:
+            if child and hasattr(child, 'data'):
+                self.visit(child)
+        return None
+        
+    def visit_func_recheck_statement(self, node):
+        # Similar to visit_recheck_statement but in a function context
+        if not node or not hasattr(node, 'children') or len(node.children) < 7:
+            return None
+            
+        condition_expr = node.children[2]
+        self.check_boolean_expr(condition_expr, "recheck condition")
+        self.visit(condition_expr)
+        
+        self.push_scope()
+        self.visit(node.children[5])  # function_prog
+        self.pop_scope()
+        
+        if len(node.children) > 7 and node.children[7]:
+            self.visit(node.children[7])
+        return None
+        
+    def visit_func_otherwise_statement(self, node):
+        # Similar to visit_otherwise_statement but in a function context
+        if not node or not hasattr(node, 'children') or len(node.children) < 3:
+            return None
+        
+        self.push_scope()
+        self.visit(node.children[2])  # function_prog
+        self.pop_scope()
+        return None
+        
+    def visit_func_switch_statement(self, node):
+        # Similar to visit_switch_statement but in a function context
+        self.visit(node.children[2])  # expression
+        
+        self.push_scope()
+        self.enter_switch()
+        
+        case_values = set()
+        case_value = self.get_value(node.children[6])
+        if case_value and case_value[0] != "unknown":
+            case_values.add(str(case_value))
+        
+        self.visit(node.children[8])  # function_prog
+        
+        if len(node.children) > 9 and node.children[9]:
+            self.visit_func_case_tail(node.children[9], case_values)
+        
+        if len(node.children) > 10 and node.children[10]:
+            self.visit(node.children[10])  # func_switch_default
+        
+        self.exit_switch()
+        self.pop_scope()
+        return None
+        
+    def visit_func_case_tail(self, node, case_values):
+        # Similar to visit_case_values but for function context
+        if not node or not hasattr(node, 'children'):
+            return
+        
+        case_value = self.get_value(node.children[1])
+        if case_value and case_value[0] != "unknown":
+            str_val = str(case_value)
+            if str_val in case_values:
+                line = getattr(node.children[1], 'line', 0)
+                column = getattr(node.children[1], 'column', 0)
+                self.errors.append(SemanticError(
+                    f"Duplicate case value: {case_value[1]}", line, column))
+            else:
+                case_values.add(str_val)
+        
+        self.visit(node.children[3])  # function_prog
+        
+        if len(node.children) > 4 and node.children[4]:
+            self.visit_func_case_tail(node.children[4], case_values)
+        return
+        
+    # Handle conditional statements in function+loop contexts    
+    def visit_func_loop_checkif_statement(self, node):
+        # Handle if statements in a function loop context
+        condition_expr = node.children[2]
+        self.check_boolean_expr(condition_expr, "checkif condition")
+        self.visit(condition_expr)
+        
+        self.push_scope()
+        self.visit(node.children[5])  # func_loop_block
+        self.pop_scope()
+        
+        for child in node.children[6:]:
+            if child and hasattr(child, 'data'):
+                self.visit(child)
+        return None
+        
+    def visit_func_loop_recheck_statement(self, node):
+        # Handle else-if statements in a function loop context
+        if not node or not hasattr(node, 'children') or len(node.children) < 7:
+            return None
+            
+        condition_expr = node.children[2]
+        self.check_boolean_expr(condition_expr, "recheck condition")
+        self.visit(condition_expr)
+        
+        self.push_scope()
+        self.visit(node.children[5])  # func_loop_block
+        self.pop_scope()
+        
+        if len(node.children) > 7 and node.children[7]:
+            self.visit(node.children[7])
+        return None
+        
+    def visit_func_loop_otherwise_statement(self, node):
+        # Handle else statements in a function loop context
+        if not node or not hasattr(node, 'children') or len(node.children) < 3:
+            return None
+        
+        self.push_scope()
+        self.visit(node.children[2])  # func_loop_block
+        self.pop_scope()
+        return None
+        
+    def visit_func_loop_switch_statement(self, node):
+        # Handle switch statements in a function loop context
+        self.visit(node.children[2])  # expression
+        
+        self.push_scope()
+        self.enter_switch()
+        
+        case_values = set()
+        case_value = self.get_value(node.children[6])
+        if case_value and case_value[0] != "unknown":
+            case_values.add(str(case_value))
+        
+        self.visit(node.children[8])  # func_loop_block
+        
+        if len(node.children) > 9 and node.children[9]:
+            self.visit_func_loop_case_tail(node.children[9], case_values)
+        
+        if len(node.children) > 10 and node.children[10]:
+            self.visit(node.children[10])  # func_loop_switch_default
+        
+        self.exit_switch()
+        self.pop_scope()
+        return None
+        
+    def visit_func_loop_case_tail(self, node, case_values):
+        # Handle additional case statements in function loop switches
+        if not node or not hasattr(node, 'children'):
+            return
+        
+        case_value = self.get_value(node.children[1])
+        if case_value and case_value[0] != "unknown":
+            str_val = str(case_value)
+            if str_val in case_values:
+                line = getattr(node.children[1], 'line', 0)
+                column = getattr(node.children[1], 'column', 0)
+                self.errors.append(SemanticError(
+                    f"Duplicate case value: {case_value[1]}", line, column))
+            else:
+                case_values.add(str_val)
+        
+        self.visit(node.children[3])  # func_loop_block
+        
+        if len(node.children) > 4 and node.children[4]:
+            self.visit_func_loop_case_tail(node.children[4], case_values)
+        return
