@@ -1,36 +1,49 @@
 # symbol_table.py
 
+class Symbol:
+    def __init__(self, name, kind, fixed=False, params=None, line=None, column=None, var_type=None):
+        """
+        kind: "variable" or "function"
+        fixed: True if declared as fixed (immutable) – applies only to variables.
+        params: For functions, a list of parameter names.
+        var_type: The inferred type of the variable.
+        """
+        self.name = name
+        self.kind = kind
+        self.fixed = fixed
+        self.params = params or []
+        self.line = line
+        self.column = column
+        self.var_type = var_type  # New attribute to store the inferred type
+
 class SymbolTable:
-    def __init__(self):
-        # Initialize with a global scope dictionary
-        self.scopes = [{}]
+    def __init__(self, parent=None):
+        self.parent = parent
+        self.variables = {}
+        self.functions = {}
 
-    def enter_scope(self):
-        self.scopes.append({})
+    def define_variable(self, name, fixed=False, line=None, column=None, var_type=None):
+        if name in self.variables:
+            return False
+        self.variables[name] = Symbol(name, "variable", fixed, line=line, column=column, var_type=var_type)
+        return True
 
-    def exit_scope(self):
-        if len(self.scopes) > 1:
-            self.scopes.pop()
-        else:
-            raise Exception("Cannot exit global scope")
+    def define_function(self, name, params=None, line=None, column=None):
+        if name in self.functions:
+            return False
+        self.functions[name] = Symbol(name, "function", fixed=False, params=params or [], line=line, column=column)
+        return True
 
-    def is_declared_in_current_scope(self, identifier):
-        """Return True if 'identifier' is declared in the current (innermost) scope."""
-        return identifier in self.scopes[-1]
+    def lookup_variable(self, name):
+        if name in self.variables:
+            return self.variables[name]
+        if self.parent:
+            return self.parent.lookup_variable(name)
+        return None
 
-    def add(self, identifier, info):
-        # Add symbol info to the innermost scope dictionary
-        self.scopes[-1][identifier] = info
-
-    def exists(self, identifier):
-        # Check in all scopes from innermost to outermost
-        for scope in reversed(self.scopes):
-            if identifier in scope:
-                return True
-        return False
-
-    def get(self, identifier):
-        for scope in reversed(self.scopes):
-            if identifier in scope:
-                return scope[identifier]
+    def lookup_function(self, name):
+        if name in self.functions:
+            return self.functions[name]
+        if self.parent:
+            return self.parent.lookup_function(name)
         return None

@@ -35,7 +35,8 @@ def analyze_full():
         if success:
             parse_tree = result
             semantic_analyzer = SemanticAnalyzer()
-            semantic_analyzer.transform(parse_tree)
+            # Change from transform() to analyze()
+            semantic_analyzer.analyze(parse_tree)
             semantic_errors = [error.to_dict() for error in semantic_analyzer.errors]
         else:
             # There is a syntax error

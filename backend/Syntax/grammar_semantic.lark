@@ -239,17 +239,13 @@ loop_switch_statement: SWITCH LPAREN expression RPAREN LBRACE CASE literals COLO
 
 func_definition: FUNC IDENTIFIER LPAREN param RPAREN LBRACE function_prog RBRACE SEMICOLON?
 
-?param: IDENTIFIER param_tail
-      | 
-?param_tail: COMMA IDENTIFIER param_tail
-           | 
+?param: IDENTIFIER (COMMA IDENTIFIER )*   // one or more params
+       |                                  // or empty if no params
 
 throw_statement: THROW expression SEMICOLON
 
-?args: expression args_tail
-     | 
-?args_tail: COMMA expression args_tail
-          | 
+?args: expression (COMMA expression)*
+        |
 
 function_prog: ( declarations
                | var_assign SEMICOLON
