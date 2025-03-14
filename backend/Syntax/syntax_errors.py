@@ -12,33 +12,38 @@ def process_syntax_error(
     if expected_tokens is None:
         expected_tokens = []
 
-    # Extract the fragment of the code up to the error column.
+    # Extract the fragment of the code up to the error column
     lines = code.splitlines()
     if 0 < line <= len(lines):
-        # Include the character at the error column.
-        line_fragment = lines[line - 1][:column]
+        # Include all previous lines and the current line up to the error column
+        preceding_lines = "\n".join(lines[:line-1])
+        current_fragment = lines[line - 1][:column]
+        line_fragment = preceding_lines + "\n" + current_fragment if preceding_lines else current_fragment
     else:
         line_fragment = code[:column]
 
-    # Helper to find which bracket is still open (if any).
-    def find_last_unmatched_bracket(fragment):
+    # Function to analyze which brackets are currently open
+    def analyze_open_brackets(fragment):
         stack = []
         bracket_pairs = {'(': ')', '[': ']', '{': '}'}
-        openings = bracket_pairs.keys()
-        closings = bracket_pairs.values()
+        
         for ch in fragment:
-            if ch in openings:
+            if ch in bracket_pairs:  # Opening bracket
                 stack.append(ch)
-            elif ch in closings:
-                if stack and bracket_pairs[stack[-1]] == ch:
-                    stack.pop()
-        if stack:
-            return bracket_pairs[stack[-1]]
-        return None
-
-    # Helper to categorize tokens.
+            elif ch in bracket_pairs.values():  # Closing bracket
+                # Find matching opening bracket
+                for opening, closing in bracket_pairs.items():
+                    if ch == closing:
+                        # If we have a matching open bracket, pop it
+                        if stack and stack[-1] == opening:
+                            stack.pop()
+                        break
+        
+        # Return list of currently open brackets
+        return stack
+    
+    # Helper to categorize tokens
     def categorize_tokens(tokens):
-        # Define your categories.
         KEYWORDS = {
             "var", "fixed", "group", "func", "throw", "show", "checkif",
             "recheck", "otherwise", "switch", "case", "default", "exit",
@@ -65,37 +70,32 @@ def process_syntax_error(
                 others_cat.append(token_str)
         return keywords_cat, literals_cat, symbols_cat, others_cat
 
-    # Omit missing bracket error output by not checking for unmatched brackets.
-    # missing = find_last_unmatched_bracket(line_fragment)
-    # if missing is not None:
-    #     final_message = f"Syntax error at line {line}, column {column}: missing {missing}"
-    #     keywords_cat, literals_cat, symbols_cat, others_cat = categorize_tokens([missing])
-    #     return {
-    #         "message": final_message,
-    #         "rawMessage": error_msg,
-    #         "expected": [missing],
-    #         "unexpected": unexpected_token,
-    #         "line": line,
-    #         "column": column,
-    #         "value": "",
-    #         "type": "syntax",
-    #         "keywords": keywords_cat,
-    #         "literals": literals_cat,
-    #         "symbols": symbols_cat,
-    #         "others": others_cat
-    #     }
-
-    # Map the unexpected token if available.
+    # Prioritize grammar violations first (unexpected tokens from the parser)
+    unexpected_grammar_error = False
+    bracket_pairs = {'(': ')', '[': ']', '{': '}'}
+    reverse_pairs = {')': '(', ']': '[', '}': '{'}
+    all_brackets = set(bracket_pairs.keys()) | set(bracket_pairs.values())
+    
+    # Get unexpected token information
     if unexpected_token is not None:
         try:
             token_type = unexpected_token.type
-            mapped_unexpected = TOKEN_MAP.get(token_type, unexpected_token.value)
+            token_value = unexpected_token.value
+            mapped_unexpected = TOKEN_MAP.get(token_type, token_value)
         except AttributeError:
+            token_value = unexpected_token
             mapped_unexpected = TOKEN_MAP.get(unexpected_token, unexpected_token)
+            
+        # Check if our unexpected token is a bracket
+        if mapped_unexpected in all_brackets:
+            unexpected_grammar_error = True
+            # Format a clearer error message for unexpected bracket
+            final_message = f"Syntax error at line {line}, column {column}: unexpected '{mapped_unexpected}'"
     else:
         mapped_unexpected = "None"
+        token_value = None
 
-    # 1) Map expected tokens using the token map.
+    # Map expected tokens using the token map
     mapped_expected = []
     for token in expected_tokens:
         if token in TOKEN_MAP:
@@ -103,53 +103,54 @@ def process_syntax_error(
         else:
             mapped_expected.append(token)
 
-    # 2) Filter out mismatched bracket closers.
-    def filter_mismatched_brackets(expected_list, fragment):
-        bracket_pairs = {'(': ')', '[': ']', '{': '}'}
-        openings = bracket_pairs.keys()
-        closings = bracket_pairs.values()
-
-        # Build stack to figure out what's still open at this point
-        stack = []
-        for ch in fragment:
-            if ch in openings:
-                stack.append(ch)
-            elif ch in closings:
-                if stack and bracket_pairs[stack[-1]] == ch:
-                    stack.pop()
-
-        if not stack:
-            # Nothing is unmatched => remove ALL bracket closers from expected
-            all_closing = set(bracket_pairs.values())  # {')', ']', '}'}
-            return [t for t in expected_list if t not in all_closing]
-        else:
-            # Some bracket is open => keep only the matching closer
-            last_open = stack[-1]
+    # If we don't have a direct grammar violation, check for bracket balancing errors
+    if not unexpected_grammar_error:
+        # Check for unclosed brackets
+        open_brackets = analyze_open_brackets(line_fragment)
+        
+        if open_brackets:
+            # There are unclosed brackets - determine which one needs to be closed first
+            last_open = open_brackets[-1]
             needed_closer = bracket_pairs[last_open]
-            # We still keep all non-bracket tokens
-            all_closing = set(bracket_pairs.values())
-            filtered = []
-            for t in expected_list:
-                if t in all_closing:
-                    if t == needed_closer:
-                        filtered.append(t)
-                else:
-                    filtered.append(t)
-            return filtered
+            final_message = f"Syntax error at line {line}, column {column}: missing '{needed_closer}'"
+        else:
+            # No unclosed brackets - standard syntax error
+            final_message = f"Syntax error at line {line}, column {column}"
+    
+    # Filter the expected tokens based on brackets and grammar
+    filtered_expected = []
+    
+    # If we have an unexpected token that's a grammar error, filter based on that
+    if unexpected_grammar_error:
+        # Keep only non-bracket tokens and the expected bracket according to grammar
+        for token in mapped_expected:
+            if token not in all_brackets or token in expected_tokens:
+                filtered_expected.append(token)
+    else:
+        # Analyze which brackets are open in the code fragment
+        open_brackets = analyze_open_brackets(line_fragment)
+        
+        # Filter out closing brackets that don't match any open brackets
+        valid_closers = set()
+        if open_brackets:
+            # Only the most recently opened bracket can be closed next
+            valid_closers.add(bracket_pairs[open_brackets[-1]])
+        
+        for token in mapped_expected:
+            if token in bracket_pairs.values():  # Closing brackets
+                if token in valid_closers:
+                    filtered_expected.append(token)
+            else:
+                # Keep all non-bracket tokens
+                filtered_expected.append(token)
 
-    mapped_expected = filter_mismatched_brackets(mapped_expected, line_fragment)
-    keywords_cat, literals_cat, symbols_cat, others_cat = categorize_tokens(mapped_expected)
-
-    # 3) Build the error message
-    final_message = (
-        # f"Syntax error at line {line}, column {column}.\n"
-        f"Syntax error \n"
-    )
-
+    # Categorize the filtered tokens for display
+    keywords_cat, literals_cat, symbols_cat, others_cat = categorize_tokens(filtered_expected)
+    
     return {
         "message": final_message,
         "rawMessage": error_msg,
-        "expected": mapped_expected,
+        "expected": filtered_expected,
         "unexpected": mapped_unexpected,
         "line": line,
         "column": column,

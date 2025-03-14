@@ -50,7 +50,22 @@ class SemanticAnalyzer(Visitor):
 
     def analyze(self, tree):
         """Main entry point to analyze the parse tree"""
+        self.errors = []  # Clear previous semantic errors
+        self.values = {}  # Optionally clear cached node values
         self.visit(tree)
+        
+        # Deduplicate errors
+        unique_errors = []
+        error_signatures = set()
+        
+        for error in self.errors:
+            # Create a signature for each error using message + location
+            signature = (error.message, error.line, error.column)
+            if signature not in error_signatures:
+                error_signatures.add(signature)
+                unique_errors.append(error)
+        
+        self.errors = unique_errors
         return self.errors
 
     def visit(self, tree):
@@ -303,6 +318,12 @@ class SemanticAnalyzer(Visitor):
         left and right are tuples: (type, value)
         Returns a tuple (result_type, result_value)
         """
+        # Check for empty operands
+        if left[0] == "empty" or right[0] == "empty":
+            self.errors.append(SemanticError(
+                f"Operator '{op}' not supported between '{left[0]}' and '{right[0]}'", 0, 0))
+            return ("unknown", None)
+        
         # New list operand checks.
         if left[0] == "list" or right[0] == "list":
             if op == "+":
@@ -366,8 +387,10 @@ class SemanticAnalyzer(Visitor):
         else:
             return ("integer", result)
 
-    def to_bool(self, expr):
+    def to_state(self, expr):
         typ, val = expr
+        if typ == "empty":
+            return False  # empty is considered falsy
         if typ == "state":
             return val == "YES"
         if typ == "integer":
@@ -446,7 +469,7 @@ class SemanticAnalyzer(Visitor):
         while i < len(children):
             op = children[i].value  # "||"
             right = self.get_value(children[i+1])
-            result_bool = self.to_bool(result) or self.to_bool(right)
+            result_bool = self.to_state(result) or self.to_state(right)
             result = ("state", "YES" if result_bool else "NO")
             i += 2
         self.values[id(node)] = result
@@ -459,7 +482,7 @@ class SemanticAnalyzer(Visitor):
         while i < len(children):
             op = children[i].value  # "&&"
             right = self.get_value(children[i+1])
-            result_bool = self.to_bool(result) and self.to_bool(right)
+            result_bool = self.to_state(result) and self.to_state(right)
             result = ("state", "YES" if result_bool else "NO")
             i += 2
         self.values[id(node)] = result
@@ -473,11 +496,29 @@ class SemanticAnalyzer(Visitor):
             left = self.get_value(children[0])
             op = children[1].value  # "==" or "!="
             right = self.get_value(children[2])
-            if op == "==":
-                result = left[1] == right[1]
+            
+            # Special handling for empty values in equality comparisons
+            if left[0] == "empty" or right[0] == "empty":
+                # Two empty values are equal to each other
+                if op == "==":
+                    result = (left[0] == "empty" and right[0] == "empty")
+                else:  # op == "!="
+                    result = (left[0] != "empty" or right[0] != "empty")
+                result = ("state", "YES" if result else "NO")
             else:
-                result = (left[1] != right[1])
-            result = ("state", "YES" if result else "NO")
+                try:
+                    if op == "==":
+                        result = left[1] == right[1]
+                    else:
+                        result = (left[1] != right[1])
+                    result = ("state", "YES" if result else "NO")
+                except Exception as e:
+                    line = children[1].line if hasattr(children[1], 'line') else 0
+                    column = children[1].column if hasattr(children[1], 'column') else 0
+                    self.errors.append(SemanticError(
+                        f"Error in equality comparison: {str(e)}", line, column))
+                    result = ("unknown", None)
+        
         self.values[id(node)] = result
         return result
 
@@ -489,17 +530,35 @@ class SemanticAnalyzer(Visitor):
             left = self.get_value(children[0])
             op = children[1].value
             right = self.get_value(children[2])
-            if op == "<":
-                result = (left[1] < right[1])
-            elif op == "<=":
-                result = (left[1] <= right[1])
-            elif op == ">":
-                result = (left[1] > right[1])
-            elif op == ">=":
-                result = (left[1] >= right[1])
+            
+            # Get line and column for error reporting
+            line = children[1].line if hasattr(children[1], "line") else 0
+            column = children[1].column if hasattr(children[1], "column") else 0
+    
+            # If either operand's value is None, report the error once and return.
+            if left[1] is None or right[1] is None:
+                self.errors.append(SemanticError(
+                    f"Operator '{op}' not supported between '{left[0]}' and '{right[0]}'",
+                    line, column))
+                result = ("unknown", None)
             else:
-                result = False
-            result = ("state", "YES" if result else "NO")
+                try:
+                    if op == "<":
+                        comparison = left[1] < right[1]
+                    elif op == "<=":
+                        comparison = left[1] <= right[1]
+                    elif op == ">":
+                        comparison = left[1] > right[1]
+                    elif op == ">=":
+                        comparison = left[1] >= right[1]
+                    else:
+                        comparison = False
+                    result = ("state", "YES" if comparison else "NO")
+                except Exception as e:
+                    self.errors.append(SemanticError(
+                        f"Error in comparison: {str(e)}", line, column))
+                    result = ("unknown", None)
+        
         self.values[id(node)] = result
         return result
 
@@ -535,7 +594,7 @@ class SemanticAnalyzer(Visitor):
             op_token = children[0]
             expr = self.get_value(children[1])
             if op_token.value == "!":
-                result_bool = not self.to_bool(expr)
+                result_bool = not self.to_state(expr)
                 result = ("state", "YES" if result_bool else "NO")
             elif op_token.value == "~":
                 typ, val = expr
@@ -1217,7 +1276,6 @@ class SemanticAnalyzer(Visitor):
         # Visit and validate the condition
         condition_expr = node.children[2]
         self.check_boolean_expr(condition_expr, "checkif condition")
-        self.visit(condition_expr)
         
         # Push scope for the if body
         self.push_scope()
