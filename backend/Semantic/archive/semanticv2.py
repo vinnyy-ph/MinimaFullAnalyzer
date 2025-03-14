@@ -622,15 +622,12 @@ class SemanticAnalyzer(Visitor):
 
     def visit_typecast_expression(self, node):
         children = node.children
+        # children[0]: target type token; children[2]: expression result.
         target_token = children[0]
         line = target_token.line
         column = target_token.column
-        inner = self.get_value(children[2])
-        # Only use the first two elements of inner
-        if isinstance(inner, tuple) and len(inner) >= 2:
-            current_type, current_value = inner[0], inner[1]
-        else:
-            current_type, current_value = "unknown", None
+        inner = self.get_value(children[2])  # (type, value)
+        current_type, current_value = inner
         target = target_token.value.lower()  # "integer", "point", "state", "text"
         try:
             if target == "integer":
@@ -886,12 +883,10 @@ class SemanticAnalyzer(Visitor):
             if var_value:
                 var_type = var_value[0] if isinstance(var_value, tuple) else None
                 
-                # Check if using list access on non-list
                 if accessor_node.children[0].type == "LSQB" and var_type != "list":
                     self.errors.append(InvalidListAccessError(
                         name, line, column))
                     return  # Exit early as this is a type error
-                # Check if using group access on non-group
                 elif accessor_node.children[0].type == "LBRACE" and var_type != "group":
                     self.errors.append(InvalidGroupAccessError(
                         name, line, column))
@@ -945,7 +940,7 @@ class SemanticAnalyzer(Visitor):
                         new_value = expr_value  # Fallback
                         
                     self.current_scope.variables[name].value = new_value
-                
+            
             print(f"Variable {name} reassigned to expression value {expr_value[1]} and type {expr_value[0]}")
         else:
             # List/group element assignment
@@ -1005,87 +1000,10 @@ class SemanticAnalyzer(Visitor):
                             self.current_scope.variables[name].value = ("list", list_value)
                             
                             print(f"List element at index {index} reassigned to {new_element_value[1]} {new_element_value[0]}")
-                
-                elif var_type == "group":
-                    # Group member assignment
-                    # Get the key from the accessor
-                    key_expr_node = accessor_node.children[1]
-                    key_expr = self.get_value(key_expr_node)
-                    
-                    # Groups can have keys of type text, integer, or state
-                    if key_expr[0] not in ["text", "integer", "state"]:
-                        line = getattr(key_expr_node, 'line', 0)
-                        column = getattr(key_expr_node, 'column', 0)
-                        self.errors.append(SemanticError(
-                            f"Group key must be text, integer, or state, got {key_expr[0]}", 
-                            line, column))
-                        return
-                    
-                    group_members = var_value[1]  # List of (key, value) pairs
-                    found = False
-                    member_index = -1
-                    
-                    # Find the member with the matching key
-                    for i, (k, v) in enumerate(group_members):
-                        if k[0] == key_expr[0] and k[1] == key_expr[1]:
-                            found = True
-                            member_index = i
-                            break
-                    
-                    if not found:
-                        # Key not found - for dictionary-like behavior, we'll add the key
-                        if op == "=":
-                            # Add new key-value pair
-                            group_members.append((key_expr, expr_value))
-                            self.current_scope.variables[name].value = ("group", group_members)
-                            key_display = f'"{key_expr[1]}"' if key_expr[0] == "text" else str(key_expr[1])
-                            print(f"Group member with key {key_display} added with value {expr_value[1]} {expr_value[0]}")
-                        else:
-                            # Cannot use compound operators on non-existent keys
-                            line = getattr(key_expr_node, 'line', 0)
-                            column = getattr(key_expr_node, 'column', 0)
-                            self.errors.append(SemanticError(
-                                f"Key '{key_expr[1]}' not found in group '{name}'", 
-                                line, column))
-                    else:
-                        # Key found - update the existing value
-                        current_value = group_members[member_index][1]
-                        
-                        # Update the value based on the operator
-                        if op == "=":
-                            new_value = expr_value
-                        else:
-                            # Validate element type for compound assignments
-                            if current_value[0] not in ["integer", "point", "text"]:
-                                self.errors.append(SemanticError(
-                                    f"Operator '{op}' not applicable to element of type '{current_value[0]}'", 
-                                    assign_op_node.line if hasattr(assign_op_node, 'line') else 0,
-                                    assign_op_node.column if hasattr(assign_op_node, 'column') else 0))
-                                return
-                            
-                            # Compute the new value based on the operator
-                            if op == "+=":
-                                new_value = self.evaluate_binary("+", current_value, expr_value)
-                            elif op == "-=":
-                                new_value = self.evaluate_binary("-", current_value, expr_value)
-                            elif op == "*=":
-                                new_value = self.evaluate_binary("*", current_value, expr_value)
-                            elif op == "/=":
-                                new_value = self.evaluate_binary("/", current_value, expr_value)
-                            else:
-                                new_value = expr_value  # Fallback
-                        
-                        # Update the group member
-                        group_members[member_index] = (key_expr, new_value)
-                        # Update the variable with the modified group
-                        self.current_scope.variables[name].value = ("group", group_members)
-                        
-                        # Format the key for display
-                        key_display = f'"{key_expr[1]}"' if key_expr[0] == "text" else str(key_expr[1])
-                        print(f"Group member with key {key_display} reassigned to {new_value[1]} {new_value[0]}")
+                # Add similar handling for group element assignment if needed
         
         return
-           
+
     def visit_id_usage(self, node):
         children = node.children
         ident = children[0]
@@ -1643,7 +1561,6 @@ class SemanticAnalyzer(Visitor):
         # In case of missing parent or variable, return the evaluated key.
         self.values[id(node)] = key_value
         return key_value
-
 
     # In visit_group_declaration, replace the group declaration block with the following:
     
