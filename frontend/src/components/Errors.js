@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { Alert, AlertTitle, Box, Typography, Tabs, Tab, useTheme } from '@mui/material';
 
 
-const Errors = ({ errors }) => {
+const Errors = ({ errors, terminalOutput = '' }) => {
   const theme = useTheme();
   const boxRef = useRef(null);
   const [tabIndex, setTabIndex] = useState(0);
@@ -11,7 +11,7 @@ const Errors = ({ errors }) => {
     if (boxRef.current) {
       boxRef.current.scrollTop = 0;
     }
-  }, [errors, tabIndex]);
+  }, [errors, tabIndex, terminalOutput]);
 
   const lexicalErrors = errors.filter((error) => error.type === 'lexical');
   const syntaxErrors = errors.filter((error) => error.type === 'syntax');
@@ -21,9 +21,25 @@ const Errors = ({ errors }) => {
     setTabIndex(newIndex);
   };
 
-  const currentErrors =
-    tabIndex === 0 ? lexicalErrors : tabIndex === 1 ? syntaxErrors : semanticErrors;
-  const hasErrors = currentErrors.length > 0;
+  let currentErrors = [];
+  let hasErrors = false;
+  let isTerminalTab = false;
+
+  if (tabIndex === 0) {
+    currentErrors = lexicalErrors;
+  } else if (tabIndex === 1) {
+    currentErrors = syntaxErrors;
+  } else if (tabIndex === 2) {
+    currentErrors = semanticErrors;
+  } else {
+    // Terminal tab
+    isTerminalTab = true;
+    hasErrors = false;
+  }
+
+  if (!isTerminalTab) {
+    hasErrors = currentErrors.length > 0;
+  }
 
   // Consistent color styling for errors or success
   const errorColor = hasErrors ? '#ff5555' : '#66ff66';
@@ -114,6 +130,67 @@ const Errors = ({ errors }) => {
     );
   };
 
+  // Terminal output renderer
+  const renderTerminalOutput = () => {
+    // Check if there are any errors before showing terminal output
+    const hasAnyErrors = lexicalErrors.length > 0 || syntaxErrors.length > 0 || semanticErrors.length > 0;
+    
+    if (hasAnyErrors) {
+      // Show error message instead of terminal output when errors exist
+      let message = "Errors detected. Resolve them before seeing terminal output.";
+      
+      if (lexicalErrors.length > 0) {
+        message = "Lexical errors detected. Resolve them before seeing terminal output.";
+      } else if (syntaxErrors.length > 0) {
+        message = "Syntax errors detected. Resolve them before seeing terminal output.";
+      } else if (semanticErrors.length > 0) {
+        message = "Semantic errors detected. Resolve them before seeing terminal output.";
+      }
+      
+      return (
+        <Typography variant="body2" sx={{ color: '#ff5555', fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace' }}>
+          {message}
+        </Typography>
+      );
+    }
+
+    if (!terminalOutput.trim()) {
+      return (
+        <Typography variant="body2" sx={{ color: '#ccffcc', fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace' }}>
+          No terminal output available.
+        </Typography>
+      );
+    }
+
+    // Process terminal lines with simple syntax highlighting
+    return (
+      <pre style={{ 
+        margin: 0, 
+        fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word'
+      }}>
+        {terminalOutput.split('\n').map((line, index) => {
+          let color = '#d4d4d4'; // Default color
+          
+          if (line.includes('Declared variable') || line.includes('Declared global variable')) {
+            color = '#4CAF50'; // Green for variable declarations
+          } else if (line.includes('Function') && line.includes('defined')) {
+            color = '#2196F3'; // Blue for function definitions
+          } else if (line.includes('Error:') || line.includes('error')) {
+            color = '#FF5555'; // Red for errors
+          }
+          
+          return (
+            <div key={index} style={{ color }}>
+              {line}
+            </div>
+          );
+        })}
+      </pre>
+    );
+  };
+
   return (
     <Box
       ref={boxRef}
@@ -158,38 +235,47 @@ const Errors = ({ errors }) => {
         <Tab label={`Lexical Errors (${lexicalErrors.length})`} />
         <Tab label={`Syntax Errors (${syntaxErrors.length})`} />
         <Tab label={`Semantic Errors (${semanticErrors.length})`} />
+        <Tab label="Terminal Output" />
       </Tabs>
 
-      <Alert
-        severity={hasErrors ? 'error' : 'success'}
-        sx={{
-          background: 'transparent',
-          color: theme.palette.text.primary,
-          width: '100%',
-        }}
-      >
-        <AlertTitle sx={{ fontWeight: 'bold', color: alertTitleColor }}>
-          {hasErrors
-            ? tabIndex === 0
-              ? 'Lexical Errors'
-              : tabIndex === 1
-              ? 'Syntax Errors'
-              : 'Semantic Errors'
-            : 'You understand Minima, Good Job!'}
-        </AlertTitle>
+      {isTerminalTab ? (
+        // Terminal Tab Content
+        <Box sx={{ padding: 1 }}>
+          {renderTerminalOutput()}
+        </Box>
+      ) : (
+        // Error Tabs Content
+        <Alert
+          severity={hasErrors ? 'error' : 'success'}
+          sx={{
+            background: 'transparent',
+            color: theme.palette.text.primary,
+            width: '100%',
+          }}
+        >
+          <AlertTitle sx={{ fontWeight: 'bold', color: alertTitleColor }}>
+            {hasErrors
+              ? tabIndex === 0
+                ? 'Lexical Errors'
+                : tabIndex === 1
+                ? 'Syntax Errors'
+                : 'Semantic Errors'
+              : 'You understand Minima, Good Job!'}
+          </AlertTitle>
 
-        {hasErrors ? (
-          <ul style={{ listStyleType: 'none', paddingLeft: 0, margin: 0 }}>
-            {currentErrors.map(renderErrorItem)}
-          </ul>
-        ) : (
-          <Typography variant="body2" sx={{ color: secondaryTextColor }}>
-            {tabIndex === 2 && syntaxErrors.length > 0
-              ? 'Syntax errors detected. Resolve them before semantic analysis.'
-              : 'No errors detected in this category.'}
-          </Typography>
-        )}
-      </Alert>
+          {hasErrors ? (
+            <ul style={{ listStyleType: 'none', paddingLeft: 0, margin: 0 }}>
+              {currentErrors.map(renderErrorItem)}
+            </ul>
+          ) : (
+            <Typography variant="body2" sx={{ color: secondaryTextColor }}>
+              {tabIndex === 2 && syntaxErrors.length > 0
+                ? 'Syntax errors detected. Resolve them before semantic analysis.'
+                : 'No errors detected in this category.'}
+            </Typography>
+          )}
+        </Alert>
+      )}
     </Box>
   );
 };

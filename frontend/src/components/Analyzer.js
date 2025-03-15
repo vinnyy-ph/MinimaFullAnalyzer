@@ -3,16 +3,21 @@ import CodeEditor from './Editor';
 import Buttons from './Buttons';
 import OutputTable from './OutputTable';
 import Errors from './Errors';
+import Terminal from './Terminal'; // Import the new Terminal component
 import axios from 'axios';
 import logo from '../assets/logomnm.png'; 
-import { Grid, Box, Typography, IconButton, useTheme } from '@mui/material';
+import { Grid, Box, Typography, IconButton, useTheme, Collapse } from '@mui/material';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 
 const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
   const [code, setCode] = useState('');
   const [tokens, setTokens] = useState([]);
   const [errors, setErrors] = useState([]);
+  const [terminalOutput, setTerminalOutput] = useState(''); // New state for terminal output
+  const [showTerminal, setShowTerminal] = useState(true); // State to toggle terminal visibility
   const [loading, setLoading] = useState(false);
   const [fileName, setFileName] = useState('');
   const theme = useTheme();
@@ -43,20 +48,20 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
         ...formattedSyntaxErrors,
         ...formattedSemanticErrors
       ]);
+  
+      // Store terminal output from response
+      setTerminalOutput(data.terminalOutput || '');
     })
     .catch((error) => {
       console.error('Unexpected error', error);
     });
-  
   };
   
-  
-  
-
   const handleClear = () => {
     setCode('');
     setTokens([]);
     setErrors([]);
+    setTerminalOutput(''); // Clear terminal output
   };
 
   const handleLoadFile = (file) => {
@@ -115,10 +120,16 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     }
   };
 
+  // Toggle terminal visibility
+  const toggleTerminal = () => {
+    setShowTerminal(!showTerminal);
+  };
+
   useEffect(() => {
     if (!code) {
       setTokens([]);
       setErrors([]);
+      setTerminalOutput(''); // Clear terminal output when code is cleared
       return;
     }
 
@@ -186,12 +197,37 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
           </Box>
           
           <Buttons
-            onAnalyze={handleAnalyze} // optional now
+            onAnalyze={handleAnalyze}
             onClear={handleClear}
             onLoadFile={handleLoadFile}
             onSaveFile={handleSaveFile}
           />
-          <Errors errors={errors} />
+          
+          {/* Terminal toggle button */}
+          {/* <Box 
+            sx={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              mt: 2,
+              mb: 1,
+              cursor: 'pointer'
+            }}
+            onClick={toggleTerminal}
+          >
+            <Typography variant="subtitle1" fontWeight="bold" color="primary">
+              Backend Terminal Output
+            </Typography>
+            <IconButton size="small">
+              {showTerminal ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            </IconButton>
+          </Box>
+          
+          <Collapse in={showTerminal}>
+            <Terminal output={terminalOutput} />
+          </Collapse> */}
+          
+          <Errors errors={errors} terminalOutput={terminalOutput} />
         </Grid>
 
         <Grid item xs={12} md={6} sx={{ height: '100%' }}>

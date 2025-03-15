@@ -32,13 +32,15 @@ class SemanticAnalyzer(Visitor):
         super().__init__()
         self.global_scope = SymbolTable()
         self.current_scope = self.global_scope
-        self.errors = []  # List of SemanticError objects
-        self.values = {}  # Store values for nodes
-        self.current_function = None  # Track the current function name (if any)
-        self.loop_depth = 0  # Track nested loop depth for exit/next validation
-        self.switch_depth = 0  # Track nested switch depth
-        self.in_loop_block = False  # Flag to indicate if we're in a loop block
-        self.has_return = False  # Track if the current function has a return statement
+        self.errors = []
+        self.values = {}
+        self.current_function = None
+        self.loop_depth = 0
+        self.switch_depth = 0
+        self.in_loop_block = False
+        self.has_return = False
+        self.function_returns = {}  # Maps function names to their return values
+        self.function_throw_expressions = {}  # Maps function names to their thrown expression nodes
 
     def push_scope(self):
         self.current_scope = SymbolTable(parent=self.current_scope)
@@ -318,57 +320,48 @@ class SemanticAnalyzer(Visitor):
         else:
             return 0
 
-    def evaluate_binary(self, op, left, right):
+    def evaluate_binary(self, op, left, right, line=0, column=0):
         """
         Evaluate a binary arithmetic expression.
         left and right are tuples: (type, value)
         Returns a tuple (result_type, result_value)
         Enhanced to track get operations.
         """
-        # Track get operations in the expression
         has_gets = []
         if left[0] == "get":
             has_gets.append(left[1])
         if right[0] == "get":
             has_gets.append(right[1])
 
-        # If we found get operations, create a special result
         if has_gets:
-            # For operations with get, we can't determine the actual value
-            # Return a special tuple marking this as a compound get operation
             return ("compound_get", has_gets)
 
-        # Check for empty operands
         if left[0] == "empty" or right[0] == "empty":
             self.errors.append(SemanticError(
-                f"Operator '{op}' not supported between '{left[0]}' and '{right[0]}'", 0, 0))
+                f"Operator '{op}' not supported between '{left[0]}' and '{right[0]}'", line, column))
             return ("unknown", None)
         
-        # New list operand checks.
         if left[0] == "list" or right[0] == "list":
             if op == "+":
                 if left[0] == "list" and right[0] == "list":
-                    # Valid: concatenate lists.
                     return ("list", left[1] + right[1])
                 else:
                     self.errors.append(SemanticError(
-                        "Operator '+' not allowed between a list and a non-list", 0, 0))
+                        "Operator '+' not allowed between a list and a non-list", line, column))
                     return ("unknown", None)
             else:
-                self.errors.append(InvalidListOperandError(op, 0, 0))
+                self.errors.append(SemanticError(
+                    f"Operator '{op}' not allowed for list operands", line, column))
                 return ("unknown", None)
         
-        # For non-list type operands, handle text concatenation.
         if op == "+" and (left[0] == "text" or right[0] == "text"):
             return ("text", str(left[1]) + str(right[1]))
         
-        # Disallow operators on text for non-concatenation.
         if left[0] == "text" or right[0] == "text":
             self.errors.append(SemanticError(
-                f"Operator '{op}' not allowed on text type", 0, 0))
+                f"Operator '{op}' not allowed on text type", line, column))
             return ("unknown", None)
         
-        # Determine arithmetic mode.
         use_point = False
         if op == "/":
             use_point = True
@@ -377,7 +370,6 @@ class SemanticAnalyzer(Visitor):
         elif (left[0] == "state" and right[0] == "point") or (left[0] == "state" and right[0] == "state"):
             use_point = False
         
-        # Convert operands to numeric.
         L = self.to_numeric(left[0], left[1], "point" if use_point else "int")
         R = self.to_numeric(right[0], right[1], "point" if use_point else "int")
         result = None
@@ -394,19 +386,18 @@ class SemanticAnalyzer(Visitor):
                 result = L % R
             else:
                 self.errors.append(SemanticError(
-                    f"Unsupported operator '{op}'", 0, 0))
+                    f"Unsupported operator '{op}'", line, column))
                 return ("unknown", None)
         except Exception as e:
             self.errors.append(SemanticError(
-                f"Error evaluating expression: {str(e)}", 0, 0))
+                f"Error evaluating expression: {str(e)}", line, column))
             return ("unknown", None)
         
-        # Determine result type.
         if use_point:
             return ("point", result)
         else:
             return ("integer", result)
-
+        
     def to_state(self, expr):
         typ, val = expr
         if typ == "empty":
@@ -587,9 +578,10 @@ class SemanticAnalyzer(Visitor):
         result = self.get_value(children[0])
         i = 1
         while i < len(children):
-            op = children[i].value  # PLUS or MINUS
+            op_token = children[i]
+            op = op_token.value  # PLUS or MINUS
             right = self.get_value(children[i+1])
-            result = self.evaluate_binary(op, result, right)
+            result = self.evaluate_binary(op, result, right, op_token.line, op_token.column)
             i += 2
         self.values[id(node)] = result
         return result
@@ -599,9 +591,10 @@ class SemanticAnalyzer(Visitor):
         result = self.get_value(children[0])
         i = 1
         while i < len(children):
-            op = children[i].value  # STAR, SLASH, or PERCENT
+            op_token = children[i]
+            op = op_token.value  # STAR, SLASH, or PERCENT
             right = self.get_value(children[i+1])
-            result = self.evaluate_binary(op, result, right)
+            result = self.evaluate_binary(op, result, right, op_token.line, op_token.column)
             i += 2
         self.values[id(node)] = result
         return result
@@ -1000,7 +993,9 @@ class SemanticAnalyzer(Visitor):
         line = ident.line
         column = ident.column
         name = ident.value
-        symbol = self.current_scope.lookup_variable(name)
+        
+        # Find the scope containing the variable
+        scope, symbol = self.current_scope.find_variable_scope(name)
         
         if symbol is None:
             self.errors.append(UndefinedIdentifierError(name, line, column))
@@ -1069,24 +1064,27 @@ class SemanticAnalyzer(Visitor):
         if not has_accessor:
             # Simple variable assignment
             if op == "=":
-                self.current_scope.variables[name].value = expr_value
+                scope.variables[name].value =expr_value
             else:
                 # Handle compound assignments (+=, -=, etc.)
                 var_value = getattr(symbol, "value", None)
                 if var_value:
                     # Compute the new value based on the operator
+                    assign_token = assign_op_node.children[0] if hasattr(assign_op_node, "children") and assign_op_node.children else assign_op_node
+                    line_info = assign_token.line
+                    column_info = assign_token.column
                     if op == "+=":
-                        new_value = self.evaluate_binary("+", var_value, expr_value)
+                        new_value = self.evaluate_binary("+", var_value, expr_value, line_info, column_info)
                     elif op == "-=":
-                        new_value = self.evaluate_binary("-", var_value, expr_value)
+                        new_value = self.evaluate_binary("-", var_value, expr_value, line_info, column_info)
                     elif op == "*=":
-                        new_value = self.evaluate_binary("*", var_value, expr_value)
+                        new_value = self.evaluate_binary("*", var_value, expr_value, line_info, column_info)
                     elif op == "/=":
-                        new_value = self.evaluate_binary("/", var_value, expr_value)
+                        new_value = self.evaluate_binary("/", var_value, expr_value, line_info, column_info)
                     else:
                         new_value = expr_value  # Fallback
                         
-                    self.current_scope.variables[name].value = new_value
+                    scope.variables[name].value =new_value
                 
             print(f"Variable {name} reassigned to expression value {expr_value[1]} and type {expr_value[0]}")
         else:
@@ -1144,7 +1142,7 @@ class SemanticAnalyzer(Visitor):
                             # Update the list element
                             list_value[index] = new_element_value
                             # Update the variable with the modified list
-                            self.current_scope.variables[name].value = ("list", list_value)
+                            scope.variables[name].value =("list", list_value)
                             
                             print(f"List element at index {index} reassigned to {new_element_value[1]} {new_element_value[0]}")
                 
@@ -1154,8 +1152,8 @@ class SemanticAnalyzer(Visitor):
                     key_expr_node = accessor_node.children[1]
                     key_expr = self.get_value(key_expr_node)
                     
-                    # Groups can have keys of type text, integer, or state
-                    if key_expr[0] not in ["text", "integer", "state"]:
+                    # Groups can have keys of type text, integer, state, or point
+                    if key_expr[0] not in ["text", "integer", "state", "point"]:
                         line = getattr(key_expr_node, 'line', 0)
                         column = getattr(key_expr_node, 'column', 0)
                         self.errors.append(SemanticError(
@@ -1179,7 +1177,7 @@ class SemanticAnalyzer(Visitor):
                         if op == "=":
                             # Add new key-value pair
                             group_members.append((key_expr, expr_value))
-                            self.current_scope.variables[name].value = ("group", group_members)
+                            scope.variables[name].value =("group", group_members)
                             key_display = f'"{key_expr[1]}"' if key_expr[0] == "text" else str(key_expr[1])
                             print(f"Group member with key {key_display} added with value {expr_value[1]} {expr_value[0]}")
                         else:
@@ -1220,7 +1218,7 @@ class SemanticAnalyzer(Visitor):
                         # Update the group member
                         group_members[member_index] = (key_expr, new_value)
                         # Update the variable with the modified group
-                        self.current_scope.variables[name].value = ("group", group_members)
+                        scope.variables[name].value =("group", group_members)
                         
                         # Format the key for display
                         key_display = f'"{key_expr[1]}"' if key_expr[0] == "text" else str(key_expr[1])
@@ -1240,28 +1238,46 @@ class SemanticAnalyzer(Visitor):
             func_symbol = self.global_scope.lookup_function(name)
             if func_symbol is None:
                 self.errors.append(FunctionNotDefinedError(name, line, column))
+                result = ("unknown", None)
             else:
                 expected = len(func_symbol.params)
-                # Visit the function call node to evaluate args
-                self.visit(children[1])
-                # Get the arguments from func_call node
-                func_call_node = children[1]
-                provided = 0
-                
-                # Check if there are arguments in the function call
-                if len(func_call_node.children) > 1:
-                    args_node = func_call_node.children[1]
-                    if hasattr(args_node, 'data') and args_node.data == 'args':
-                        # Count expressions in args, skipping commas
-                        provided = sum(1 for child in args_node.children if not (hasattr(child, 'type') and child.type == "COMMA"))
-                    elif hasattr(args_node, 'data') or hasattr(args_node, 'type'):
-                        # If there's a single argument and it's not a comma
-                        provided = 1
+                # Get the arguments
+                arg_values = self.evaluate_function_args(children[1])
+                provided = len(arg_values)
                 
                 if expected != provided:
                     self.errors.append(ParameterMismatchError(
                         name, expected, provided, line, column))
-            result = ("unknown", None)
+                    result = ("unknown", None)
+                else:
+                    # If this function has a thrown expression
+                    if name in self.function_throw_expressions:
+                        # Get the thrown expression
+                        expr_node = self.function_throw_expressions[name]
+                        
+                        # Save the current scope and create a new one for function evaluation
+                        old_scope = self.current_scope
+                        self.push_scope()
+                        
+                        # Define parameters with argument values
+                        for i, param_name in enumerate(func_symbol.params):
+                            self.current_scope.define_variable(param_name, fixed=False)
+                            self.current_scope.variables[param_name].value = arg_values[i]
+                        
+                        # Evaluate the thrown expression in this scope
+                        result = self.get_value(expr_node)
+                        
+                        # Restore the original scope
+                        self.current_scope = old_scope
+                        
+                        print(f"Function call to '{name}' evaluates to {result[1]} of type {result[0]}")
+                    elif name in self.function_returns:
+                        result = self.function_returns[name]
+                        print(f"Function call to '{name}' returns {result[1]} of type {result[0]}")
+                    else:
+                        # If no return value is stored, return empty
+                        result = ("empty", None)
+                        print(f"Function call to '{name}' has no return value, using empty")
         else:
             symbol = self.current_scope.lookup_variable(name)
             if symbol is None:
@@ -1292,7 +1308,6 @@ class SemanticAnalyzer(Visitor):
 
         self.values[id(node)] = result
         return result
-
         
     def visit_func_call(self, node):
         """
@@ -1354,7 +1369,10 @@ class SemanticAnalyzer(Visitor):
 
         # Save the current function context and enter a new scope for the function body (local scope)
         old_function = self.current_function
+        old_has_return = self.has_return
+        
         self.current_function = func_name
+        self.has_return = False  # Reset return tracking for this function
         self.push_scope()
 
         # Define each parameter as a local variable in the new scope.
@@ -1363,10 +1381,16 @@ class SemanticAnalyzer(Visitor):
 
         # Visit the function body; the body is in the "function_prog" child (index 6)
         self.visit(node.children[6])
+        
+        # AFTER visiting, check if a return value was set
+        if not self.has_return and func_name not in self.function_returns:
+            self.function_returns[func_name] = ("empty", None)
+            print(f"Function '{func_name}' has no return value, defaulting to empty")
 
         # Exit the function's local scope and restore the previous function context.
         self.pop_scope()
         self.current_function = old_function
+        self.has_return = old_has_return
 
     def visit_function_prog(self, node):
         """
@@ -1380,6 +1404,7 @@ class SemanticAnalyzer(Visitor):
         """
         Processes a throw statement - needs to be in a function.
         Syntax: THROW expression SEMICOLON
+        Stores the expression for later evaluation when the function is called.
         """
         if not self.current_function:
             throw_token = node.children[0]
@@ -1387,10 +1412,43 @@ class SemanticAnalyzer(Visitor):
             column = throw_token.column
             self.errors.append(ControlFlowError(
                 "throw", "functions", line, column))
+            return None
         
-        # Visit the expression to check its semantics
-        self.visit(node.children[1])
+        # Store the expression node for later evaluation during function calls
+        expr_node = node.children[1]
+        self.function_throw_expressions[self.current_function] = expr_node
+        
+        # Set that this function has a return value
+        self.has_return = True
+        
+        print(f"Function '{self.current_function}' throws an expression")
+        
         return None
+
+    def evaluate_function_args(self, func_call_node):
+        """
+        Evaluates the arguments in a function call.
+        Returns a list of (type, value) tuples.
+        """
+        args = []
+        if len(func_call_node.children) > 1:
+            args_node = func_call_node.children[1]
+            
+            if hasattr(args_node, 'data') and args_node.data == 'args':
+                for child in args_node.children:
+                    # Skip commas
+                    if hasattr(child, 'type') and child.type == "COMMA":
+                        continue
+                    arg_val = self.get_value(child)
+                    if arg_val is not None:
+                        args.append(arg_val)
+            elif hasattr(args_node, 'data') or hasattr(args_node, 'type'):
+                # Single argument
+                arg_val = self.get_value(args_node)
+                if arg_val is not None:
+                    args.append(arg_val)
+        
+        return args
 
     def visit_show_statement(self, node):
         """
@@ -1514,7 +1572,7 @@ class SemanticAnalyzer(Visitor):
         if not expr_value or expr_value[0] == "unknown":
             return  # Skip further checks if expression could not be evaluated
             
-        if expr_value[0] != "state" and expr_value[0] != "integer" and expr_value[0] != "point":
+        if expr_value[0] != "state" and expr_value[0] != "integer" and expr_value[0] != "point" and expr_value[0] != "text":
             # Get line and column from the first token in the expression if possible
             line, column = 0, 0
             if hasattr(expr_node, 'children') and expr_node.children:
@@ -1524,7 +1582,7 @@ class SemanticAnalyzer(Visitor):
                     column = first_child.column
                     
             self.errors.append(TypeMismatchError(
-                "state, integer, or point", expr_value[0], context, line, column))
+                "state, integer, point, or text", expr_value[0], context, line, column))
             
     def visit_each_statement(self, node):
         """
@@ -1877,8 +1935,8 @@ class SemanticAnalyzer(Visitor):
         key = self.get_value(key_expr)
         value = self.get_value(value_expr)
         
-        # Only text, integer, and state can be keys
-        if key[0] not in ["text", "integer", "state"]:
+        # Only text, integer, point, and text can be keys
+        if key[0] not in ["text", "integer", "state", "point"]:
             self.errors.append(SemanticError(
                 f"Group key must be text, integer, or state, got {key[0]}",
                 getattr(key_expr, 'line', 0), getattr(key_expr, 'column', 0)))
@@ -2240,3 +2298,4 @@ class SemanticAnalyzer(Visitor):
         if len(node.children) > 4 and node.children[4]:
             self.visit_func_loop_case_tail(node.children[4], case_values)
         return
+

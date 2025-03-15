@@ -47,3 +47,11 @@ class SymbolTable:
         if self.parent:
             return self.parent.lookup_function(name)
         return None
+
+    def find_variable_scope(self, name):
+        """Find the scope containing the variable and return (scope, symbol)."""
+        if name in self.variables:
+            return (self, self.variables[name])
+        if self.parent:
+            return self.parent.find_variable_scope(name)
+        return (None, None)

@@ -77,6 +77,8 @@ start: program
 
 program: (declarations | func_definition | statements)*
 
+program_block: (declarations | statements)*
+
 declarations: varlist_declaration
             | fixed_declaration
             | group_declaration
@@ -188,19 +190,19 @@ show_statement: SHOW LPAREN expression RPAREN
                | repeat_statement SEMICOLON? 
                | do_repeat_statement SEMICOLON?
 
-checkif_statement: CHECKIF LPAREN expression RPAREN LBRACE program RBRACE recheck_statement otherwise_statement
+checkif_statement: CHECKIF LPAREN expression RPAREN LBRACE program_block RBRACE recheck_statement otherwise_statement
 
-?recheck_statement: RECHECK LPAREN expression RPAREN LBRACE program RBRACE recheck_statement
+?recheck_statement: RECHECK LPAREN expression RPAREN LBRACE program_block RBRACE recheck_statement
                   | 
-?otherwise_statement: OTHERWISE LBRACE program RBRACE
+?otherwise_statement: OTHERWISE LBRACE program_block RBRACE
                     | 
 
-switch_statement: SWITCH LPAREN expression RPAREN LBRACE CASE literals COLON program case_tail default RBRACE
+switch_statement: SWITCH LPAREN expression RPAREN LBRACE CASE literals COLON program_block case_tail default RBRACE
 
-?case_tail: CASE literals COLON program case_tail
+?case_tail: CASE literals COLON program_block case_tail
           | 
 
-?default: DEFAULT COLON program
+?default: DEFAULT COLON program_block
         | 
 
 each_statement: EACH LPAREN each_initialization expression SEMICOLON (expression | var_assign) RPAREN LBRACE loop_block RBRACE
@@ -213,7 +215,6 @@ do_repeat_statement: DO LBRACE loop_block RBRACE REPEAT LPAREN expression RPAREN
                     | var_assign SEMICOLON
 
 loop_block: ( declarations
-            | func_definition
             | var_assign SEMICOLON
             | expression SEMICOLON
             | show_statement SEMICOLON
@@ -281,7 +282,7 @@ control_flow: EXIT SEMICOLON
                     | repeat_func_statement SEMICOLON? 
                     | do_repeat_func_statement SEMICOLON?
 
-each_func_statement: EACH LPAREN each_initialization expression SEMICOLON expression RPAREN LBRACE func_loop_block RBRACE SEMICOLON?
+each_func_statement: EACH LPAREN each_initialization expression SEMICOLON (expression | var_assign) RPAREN LBRACE func_loop_block RBRACE SEMICOLON?
 
 repeat_func_statement: REPEAT LPAREN expression RPAREN LBRACE func_loop_block RBRACE SEMICOLON?
 

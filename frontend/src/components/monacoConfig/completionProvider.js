@@ -68,7 +68,7 @@ export const provideCompletionItems = (monacoInstance) => {
           { 
             label: 'switch', 
             kind: monacoInstance.languages.CompletionItemKind.Keyword, 
-            insertText: 'switch (${1:expression}) {\n\tcase ${2:value}:\n\t\t${3:# code}\n\tdefault:\n\t\t${4:# code}\n}',
+            insertText: 'switch (${1:expression}) {\n\tcase ${2:1}:\n\t\t${3:# code}\n\tdefault:\n\t\t${4:# code}\n}',
             insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet 
           },
           { 

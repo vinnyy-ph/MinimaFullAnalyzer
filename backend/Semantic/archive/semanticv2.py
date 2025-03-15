@@ -1597,7 +1597,7 @@ class SemanticAnalyzer(Visitor):
     def visit_group_members(self, node, group_data, group_members):
         if not node or not hasattr(node, 'children'):
             return
-        
+    
         # Process key-value pair
         key_expr = node.children[0]
         value_expr = node.children[2]
@@ -1605,10 +1605,11 @@ class SemanticAnalyzer(Visitor):
         key = self.get_value(key_expr)
         value = self.get_value(value_expr)
         
-        # Only text, integer, and state can be keys
-        if key[0] not in ["text", "integer", "state"]:
+        # Allow keys to be text, integer, state, or point
+        allowed_keys = ["text", "integer", "state", "point"]
+        if key[0] not in allowed_keys:
             self.errors.append(SemanticError(
-                f"Group key must be text, integer, or state, got {key[0]}",
+                f"Group key must be one of {', '.join(allowed_keys)}, got {key[0]}",
                 getattr(key_expr, 'line', 0), getattr(key_expr, 'column', 0)))
         else:
             # Use the string representation for duplicate detection
