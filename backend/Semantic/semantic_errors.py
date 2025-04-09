@@ -1,5 +1,3 @@
-# semantic_errors.py
-
 class SemanticError(Exception):
     def __init__(self, message, line=None, column=None):
         self.message = message
@@ -61,11 +59,6 @@ class TypeMismatchError(SemanticError):
 class UnreachableCodeError(SemanticError):
     def __init__(self, line=None, column=None):
         message = "Unreachable code detected"
-        super().__init__(message, line, column)
-
-class InvalidGroupAccessError(SemanticError):
-    def __init__(self, variable, line=None, column=None):
-        message = f"Variable '{variable}' is not a group"
         super().__init__(message, line, column)
 
 class InvalidListAccessError(SemanticError):

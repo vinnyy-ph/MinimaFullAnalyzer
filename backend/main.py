@@ -3,6 +3,7 @@ from flask_cors import CORS
 from .Lexer.minima_lexer import Lexer  
 from .Syntax.syntax_analyzer import analyze_syntax, parser
 from .Semantic.semantic_analyzer import SemanticAnalyzer 
+from .CodegenTAC.code_executor import execute_code, format_tac_instructions
 import io
 import sys
 from contextlib import redirect_stdout
@@ -76,6 +77,27 @@ def analyze_full():
         'semanticErrors': semantic_errors,
         'terminalOutput': terminal_output  # Add terminal output to response
     })
+
+@app.route('/executeCode', methods=['POST'])
+def execute_code_endpoint():
+    """Endpoint to execute Minima code and return the results."""
+    data = request.get_json()
+    code = data.get('code', '')
+    
+    # Capture stdout for debug messages
+    output_buffer = io.StringIO()
+    with redirect_stdout(output_buffer):
+        # Execute the code
+        results = execute_code(code)
+    
+    # Add debug terminal output
+    results['terminalOutput'] = output_buffer.getvalue()
+    
+    # Format TAC instructions for readability
+    if 'tac' in results and results['tac']:
+        results['formattedTAC'] = format_tac_instructions(results['tac'])
+    
+    return jsonify(results)
 
 if __name__ == '__main__':
     app.run(debug=True)

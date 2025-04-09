@@ -1,12 +1,10 @@
-# symbol_table.py
-
 class Symbol:
     def __init__(self, name, kind, fixed=False, params=None, line=None, column=None, var_type=None):
         """
         kind: "variable" or "function"
         fixed: True if declared as fixed (immutable) – applies only to variables.
         params: For functions, a list of parameter names.
-        var_type: The inferred type of the variable.
+        var_type: Possibly store an inferred type of the variable.
         """
         self.name = name
         self.kind = kind
@@ -14,7 +12,7 @@ class Symbol:
         self.params = params or []
         self.line = line
         self.column = column
-        self.var_type = var_type  # New attribute to store the inferred type
+        self.var_type = var_type
 
 class SymbolTable:
     def __init__(self, parent=None):

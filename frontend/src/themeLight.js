@@ -11,6 +11,11 @@ const lightTheme = createTheme({
     secondary: {
       main: '#dc004e', // Pink
     },
+    buttonRun: {
+      main: '#4caf50',    // Green color for Run button
+      dark: '#388e3c',
+      contrastText: '#ffffff'
+    },
     background: {
       default: '#ffa2b9',
       paper: '#fe6e94',

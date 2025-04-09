@@ -3,8 +3,9 @@ import { Box, Button } from '@mui/material';
 import ClearIcon from '@mui/icons-material/Clear';
 import LoadIcon from '@mui/icons-material/FolderOpen';
 import SaveIcon from '@mui/icons-material/Save'; 
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 
-const Buttons = ({ onAnalyze, onClear, onLoadFile, onSaveFile }) => {
+const Buttons = ({ onAnalyze, onClear, onLoadFile, onSaveFile, onExecute }) => {
   const fileInputRef = useRef(null);
 
   const handleLoadClick = () => {
@@ -22,7 +23,7 @@ const Buttons = ({ onAnalyze, onClear, onLoadFile, onSaveFile }) => {
   };
 
   return (
-    <Box sx={{ marginTop: 3, display: 'flex', gap: 4, paddingX: 1 }}>
+    <Box sx={{ marginTop: 3, display: 'flex', gap: 2, paddingX: 1 }}>
       <Button
         variant="contained"
         color="buttonClear"
@@ -31,7 +32,7 @@ const Buttons = ({ onAnalyze, onClear, onLoadFile, onSaveFile }) => {
         fullWidth
         sx={{ 
           fontWeight: 700, 
-          fontSize: '1rem',
+          fontSize: '0.9rem',
           letterSpacing: '0.5px',
           color: 'buttonClear.contrastText',
           backgroundColor: 'buttonClear.main',
@@ -50,7 +51,7 @@ const Buttons = ({ onAnalyze, onClear, onLoadFile, onSaveFile }) => {
         fullWidth
         sx={{ 
           fontWeight: 700, 
-          fontSize: '1rem',
+          fontSize: '0.9rem',
           letterSpacing: '0.5px',
           color: 'buttonLoad.contrastText',
           backgroundColor: 'buttonLoad.main',
@@ -69,7 +70,7 @@ const Buttons = ({ onAnalyze, onClear, onLoadFile, onSaveFile }) => {
         fullWidth
         sx={{ 
           fontWeight: 700, 
-          fontSize: '1rem',
+          fontSize: '0.9rem',
           letterSpacing: '0.5px',
           color: 'buttonSave.contrastText',
           backgroundColor: 'buttonSave.main',
@@ -79,6 +80,25 @@ const Buttons = ({ onAnalyze, onClear, onLoadFile, onSaveFile }) => {
         }}
       >
         Save File
+      </Button>
+      <Button
+        variant="contained"
+        color="success"
+        startIcon={<PlayArrowIcon />}
+        onClick={onExecute}
+        fullWidth
+        sx={{ 
+          fontWeight: 700, 
+          fontSize: '0.9rem',
+          letterSpacing: '0.5px',
+          color: 'white',
+          backgroundColor: '#4caf50',
+          '&:hover': {
+            backgroundColor: '#388e3c',
+          },
+        }}
+      >
+        Execute
       </Button>
       <input
         type="file"

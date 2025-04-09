@@ -15,6 +15,11 @@ const darkTheme = createTheme({
       default: '#161b33',
       paper: '#001524',
     },
+    buttonRun: {
+      main: '#4caf50',    // Green color for Run button
+      dark: '#388e3c',
+      contrastText: '#ffffff'
+    },
     text: {
       primary: '#ffffff',
       secondary: '#b0bec5',

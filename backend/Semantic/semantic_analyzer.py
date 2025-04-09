@@ -2298,4 +2298,3 @@ class SemanticAnalyzer(Visitor):
         if len(node.children) > 4 and node.children[4]:
             self.visit_func_loop_case_tail(node.children[4], case_values)
         return
-
