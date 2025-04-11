@@ -336,6 +336,46 @@ class SemanticAnalyzer(Visitor):
         if has_gets:
             return ("compound_get", has_gets)
 
+        # NEW CODE: Handle operations involving parameters
+        if left[0] == "parameter" or right[0] == "parameter":
+            if op in ["+", "-", "*", "/", "%"]:  # Arithmetic operations
+                # For arithmetic operations, infer the result type
+                if op == "/" or left[0] == "point" or right[0] == "point":
+                    return ("point", None)  # Division or point operand results in point
+                else:
+                    return ("integer", None)  # Default to integer for other arithmetic ops
+            elif op in ["==", "!=", "<", ">", "<=", ">="]:  # Comparison operations
+                return ("state", None)  # Comparisons produce a state (boolean)
+            else:
+                # For other operations, be conservative
+                return ("unknown", None)
+
+        if left[0] == "empty" or right[0] == "empty":
+            self.errors.append(SemanticError(
+                f"Operator '{op}' not supported between '{left[0]}' and '{right[0]}'", line, column))
+            return ("unknown", None)
+        
+        if left[0] == "list" or right[0] == "list":
+            if op == "+":
+                if left[0] == "list" and right[0] == "list":
+                    return ("list", left[1] + right[1])
+                else:
+                    self.errors.append(SemanticError(
+                        "Operator '+' not allowed between a list and a non-list", line, column))
+                    return ("unknown", None)
+            else:
+                self.errors.append(SemanticError(
+                    f"Operator '{op}' not allowed for list operands", line, column))
+                return ("unknown", None)
+        
+        if op == "+" and (left[0] == "text" or right[0] == "text"):
+            return ("text", str(left[1]) + str(right[1]))
+        
+        if left[0] == "text" or right[0] == "text":
+            self.errors.append(SemanticError(
+                f"Operator '{op}' not allowed on text type", line, column))
+            return ("unknown", None)
+
         if left[0] == "empty" or right[0] == "empty":
             self.errors.append(SemanticError(
                 f"Operator '{op}' not supported between '{left[0]}' and '{right[0]}'", line, column))
@@ -743,25 +783,25 @@ class SemanticAnalyzer(Visitor):
                     else:
                         # Normal case (not a get operation)
                         if self.current_function:
-                            print(f"Declared variable {name} with expression value {expr_value[1]} and type {expr_value[0]} inside function {self.current_function}")
+                            print(f"Declared variable {name} inside function {self.current_function}")
                         else:
                             print(f"Declared global variable {name} with expression value {expr_value[1]} and type {expr_value[0]}")
                         self.current_scope.variables[name].value = expr_value
                 else:
                     # Handle non-tuple case
                     if self.current_function:
-                        print(f"Declared variable {name} with expression value {expr_value} inside function {self.current_function}")
+                        print(f"Declared variable {name} inside function {self.current_function}")
                     else:
                         print(f"Declared global variable {name} with expression value {expr_value}")
                     self.current_scope.variables[name].value = expr_value
             else:
                 if self.current_function:
-                    print(f"Declared variable {name} with empty value inside function {self.current_function}")
+                    print(f"Declared variable {name} inside function {self.current_function}")
                 else:
                     print(f"Declared global variable {name} with empty value")
         else:
             if self.current_function:
-                print(f"Declared variable {name} with empty value inside function {self.current_function}")
+                print(f"Declared variable {name} inside function {self.current_function}")
             else:
                 print(f"Declared global variable {name} with empty value")
         
@@ -1250,7 +1290,7 @@ class SemanticAnalyzer(Visitor):
                         name, expected, provided, line, column))
                     result = ("unknown", None)
                 else:
-                    # If this function has a thrown expression
+                    # FIXED: First check if there's a throw expression to evaluate with parameters
                     if name in self.function_throw_expressions:
                         # Get the thrown expression
                         expr_node = self.function_throw_expressions[name]
@@ -1267,18 +1307,29 @@ class SemanticAnalyzer(Visitor):
                         # Evaluate the thrown expression in this scope
                         result = self.get_value(expr_node)
                         
-                        # Restore the original scope
-                        self.current_scope = old_scope
+                        # Store the result for this specific call
+                        self.function_returns[name] = result
                         
-                        print(f"Function call to '{name}' evaluates to {result[1]} of type {result[0]}")
+                        # Restore the previous scope
+                        self.pop_scope()
+                        
+                        if isinstance(result, tuple) and len(result) >= 2:
+                            print(f"Function call to '{name}' returns {result[1]} of type {result[0]}")
+                        else:
+                            print(f"Function call to '{name}' returns {result}")
                     elif name in self.function_returns:
+                        # Only fallback to stored return value if no expression is available
                         result = self.function_returns[name]
-                        print(f"Function call to '{name}' returns {result[1]} of type {result[0]}")
+                        if isinstance(result, tuple) and len(result) >= 2:
+                            print(f"Function call to '{name}' returns {result[1]} of type {result[0]}")
+                        else:
+                            print(f"Function call to '{name}' returns {result}")
                     else:
                         # If no return value is stored, return empty
                         result = ("empty", None)
-                        print(f"Function call to '{name}' has no return value, using empty")
+                        print(f"Function call to '{name}' throws value empty")
         else:
+            # Look up the variable in the current scope - proper scope resolution
             symbol = self.current_scope.lookup_variable(name)
             if symbol is None:
                 self.errors.append(UndefinedIdentifierError(name, line, column))
@@ -1375,9 +1426,11 @@ class SemanticAnalyzer(Visitor):
         self.has_return = False  # Reset return tracking for this function
         self.push_scope()
 
-        # Define each parameter as a local variable in the new scope.
+        # Define each parameter as a local variable in the new scope WITH PARAMETER TYPE
+        # This is the key change - mark parameters as a special type
         for param in params:
             self.current_scope.define_variable(param, fixed=False)
+            self.current_scope.variables[param].value = ("parameter", None)  # Mark as parameter type
 
         # Visit the function body; the body is in the "function_prog" child (index 6)
         self.visit(node.children[6])
@@ -1385,7 +1438,7 @@ class SemanticAnalyzer(Visitor):
         # AFTER visiting, check if a return value was set
         if not self.has_return and func_name not in self.function_returns:
             self.function_returns[func_name] = ("empty", None)
-            print(f"Function '{func_name}' has no return value, defaulting to empty")
+            print(f"Function '{func_name}' throws value empty")
 
         # Exit the function's local scope and restore the previous function context.
         self.pop_scope()
@@ -1414,14 +1467,22 @@ class SemanticAnalyzer(Visitor):
                 "throw", "functions", line, column))
             return None
         
-        # Store the expression node for later evaluation during function calls
+        # Get expression being thrown
         expr_node = node.children[1]
+        
+        # Get the value of the expression
+        result = self.get_value(expr_node)
+        
+        # Store the expression node for later evaluation during function calls
         self.function_throw_expressions[self.current_function] = expr_node
+        
+        # Also store the evaluated result for direct lookup
+        self.function_returns[self.current_function] = result
         
         # Set that this function has a return value
         self.has_return = True
         
-        print(f"Function '{self.current_function}' throws an expression")
+        print(f"Function '{self.current_function}' throws an expression/value")
         
         return None
 
@@ -1586,52 +1647,82 @@ class SemanticAnalyzer(Visitor):
             
     def visit_each_statement(self, node):
         """
-        Semantic analysis for each_statement.
-        Syntax: EACH LPAREN each_initialization expression SEMICOLON expression RPAREN LBRACE loop_block RBRACE
+        Generate TAC for each loops (for loops).
+        Structure: EACH LPAREN each_initialization expression SEMICOLON (expression | var_assign) RPAREN LBRACE loop_block RBRACE
         """
-        # Visit and validate the initialization
-        self.visit(node.children[2])
+        # Generate labels for loop control
+        start_label = self.get_label()
+        cond_label = self.get_label()
+        end_label = self.get_label()
         
-        # Visit and validate the condition
-        condition_expr = node.children[3]
-        self.check_boolean_expr(condition_expr, "each loop condition")
-        self.visit(condition_expr)
+        # Remember these labels for nested control flow statements (exit, next)
+        self.loop_stack.append((cond_label, end_label))
         
-        # Visit and validate the increment
-        self.visit(node.children[5])
+        # Initialization
+        self.visit(node.children[2])  # each_initialization
         
-        # Push scope and enter loop for the body
-        self.push_scope()
-        self.enter_loop()
+        # Jump to condition check
+        self.emit('GOTO', None, None, cond_label)
         
-        # Visit the loop body
-        self.visit(node.children[7])
+        # Label for loop start
+        self.emit('LABEL', None, None, start_label)
         
-        # Exit loop and pop scope
-        self.exit_loop()
-        self.pop_scope()
+        # Visit loop body
+        self.visit(node.children[7])  # loop_block
+        
+        # Update expression
+        self.visit(node.children[5])  # update expression
+        
+        # Condition check label
+        self.emit('LABEL', None, None, cond_label)
+        
+        # Evaluate condition
+        condition = self.visit(node.children[3])
+        
+        # If condition is true, jump to start
+        self.emit('IFTRUE', condition, None, start_label)
+        
+        # End label
+        self.emit('LABEL', None, None, end_label)
+        
+        # Remove this loop from the stack
+        self.loop_stack.pop()
+        
         return None
 
     def visit_repeat_statement(self, node):
         """
-        Semantic analysis for repeat_statement.
-        Syntax: REPEAT LPAREN expression RPAREN LBRACE loop_block RBRACE
+        Generate TAC for repeat loops (while loops).
+        Structure: REPEAT LPAREN expression RPAREN LBRACE loop_block RBRACE
         """
-        # Visit and validate the condition
-        condition_expr = node.children[2]
-        self.check_boolean_expr(condition_expr, "repeat loop condition")
-        self.visit(condition_expr)
+        # Generate labels for start and end
+        start_label = self.get_label()
+        end_label = self.get_label()
         
-        # Push scope and enter loop for the body
-        self.push_scope()
-        self.enter_loop()
+        # Save labels for control flow statements
+        self.loop_stack.append((start_label, end_label))
         
-        # Visit the loop body
-        self.visit(node.children[4])
+        # Start label
+        self.emit('LABEL', None, None, start_label)
         
-        # Exit loop and pop scope
-        self.exit_loop()
-        self.pop_scope()
+        # Evaluate condition
+        condition = self.visit(node.children[2])
+        
+        # If condition is false, exit loop
+        self.emit('IFFALSE', condition, None, end_label)
+        
+        # Visit loop body
+        self.visit(node.children[4])  # loop_block
+        
+        # Jump back to start after body
+        self.emit('GOTO', None, None, start_label)
+        
+        # End label
+        self.emit('LABEL', None, None, end_label)
+        
+        # Pop this loop from stack
+        self.loop_stack.pop()
+        
         return None
 
     def visit_do_repeat_statement(self, node):
@@ -1838,6 +1929,19 @@ class SemanticAnalyzer(Visitor):
                                 else:
                                     # Return the character at the specified index as a text type
                                     result = ("text", text_value[idx])
+                                self.values[id(node)] = result
+                                return result
+                        elif var_type == "list":
+                            # List index lookup
+                            list_items = var_value[1]
+                            if key_value[0] == "integer":
+                                idx = key_value[1]
+                                if idx < 0 or idx >= len(list_items):
+                                    # Error handling...
+                                    result = ("unknown", None)
+                                else:
+                                    # Return the actual element, not a wrapper
+                                    result = list_items[idx]
                                 self.values[id(node)] = result
                                 return result
                         elif var_type != "list":

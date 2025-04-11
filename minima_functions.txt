@@ -1,0 +1,6 @@
+func multiply(a,b){
+    var product = a*b;
+    throw product;
+}
+
+show(multiply(10,4));

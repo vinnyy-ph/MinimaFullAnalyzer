@@ -1,0 +1,25 @@
+var year = 2003;
+
+checkif((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)){
+	show("year is a leap year");
+} otherwise{
+	show("year is not a leap year");
+}
+
+// TAC:
+
+0: ASSIGN 2003 year
+1: MOD year 4 t1
+2: EQ t1 0 t2
+3: MOD year 100 t3
+4: NEQ t3 0 t4
+5: AND t2 t4 t5
+6: MOD year 400 t6
+7: EQ t6 0 t7
+8: OR t5 t7 t8
+9: IFFALSE t8 L1
+10: PRINT year is a leap year
+11: GOTO L2
+12: LABEL L1
+13: PRINT year is not a leap year
+14: LABEL L2

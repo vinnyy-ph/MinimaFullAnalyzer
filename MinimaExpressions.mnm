@@ -1,0 +1,25 @@
+var a = (10 + 5.5) * 2 - 3 + " is the result";
+var b = ("hello " + "world") + " count: " + (5 * 2);
+var c = YES && (15 > 10) || ("value: " + (20 / 4) == "value: 5");
+var d = (2.5 + 3) > 5 && "check: " + (4 + 1) != "check: 4";
+var e = "answer: " + ((10 + 20) / 2) + " valid: " + YES;
+var f = !(NO) && ((12 - 4) == 8 ) || ("result " + 10 != "result10");
+var h = ("text " + 5) + " is greater: " + (15 > 10) + " " + YES;
+var i = (20.2 - 5.1) * 2 == (3 + 12.1) && "check" != "test";
+var j = ("sum: " + (5 + 3)) + " state: " + (YES && (10 < 20));
+var k = (2.5 + (10 / 5)) * (4.1 - 1) + " computed: " + (3 != 5);
+var l = !(YES) || ((10 + 5.5) <= (20 / 4)) + " not valid";
+var m = ((2.2 * 3) + (5 / 2.5)) + " and " + ("value" != "output");
+
+show(a);
+show(b);
+show(c);
+show(d);
+show(e);
+show(f);
+show(h);
+show(i);
+show(j);
+show(k);
+show(l);
+show(m);

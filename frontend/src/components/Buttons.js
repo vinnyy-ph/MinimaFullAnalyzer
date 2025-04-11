@@ -1,11 +1,11 @@
 import React, { useRef } from 'react';
-import { Box, Button } from '@mui/material';
+import { Box, Button, Tooltip } from '@mui/material';
 import ClearIcon from '@mui/icons-material/Clear';
 import LoadIcon from '@mui/icons-material/FolderOpen';
 import SaveIcon from '@mui/icons-material/Save'; 
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 
-const Buttons = ({ onAnalyze, onClear, onLoadFile, onSaveFile, onExecute }) => {
+const Buttons = ({ onAnalyze, onClear, onLoadFile, onSaveFile, onExecute, disableExecute, executing }) => {
   const fileInputRef = useRef(null);
 
   const handleLoadClick = () => {
@@ -81,25 +81,42 @@ const Buttons = ({ onAnalyze, onClear, onLoadFile, onSaveFile, onExecute }) => {
       >
         Save File
       </Button>
-      <Button
-        variant="contained"
-        color="success"
-        startIcon={<PlayArrowIcon />}
-        onClick={onExecute}
-        fullWidth
-        sx={{ 
-          fontWeight: 700, 
-          fontSize: '0.9rem',
-          letterSpacing: '0.5px',
-          color: 'white',
-          backgroundColor: '#4caf50',
-          '&:hover': {
-            backgroundColor: '#388e3c',
-          },
-        }}
+      <Tooltip 
+        title={disableExecute ? "Fix code errors before executing" : ""}
+        placement="top"
+        arrow
+        disableHoverListener={!disableExecute}
+        enterDelay={500}
       >
-        Execute
-      </Button>
+        <span style={{ width: '100%' }}> {/* Wrapper needed for disabled button tooltip */}
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={<PlayArrowIcon />}
+            onClick={onExecute}
+            disabled={disableExecute || executing}
+            fullWidth
+            sx={{ 
+              fontWeight: 700, 
+              fontSize: '0.9rem',
+              letterSpacing: '0.5px',
+              color: 'white',
+              backgroundColor: executing ? '#a5d6a7' : disableExecute ? '#ff5252' : '#4caf50',
+              '&:hover': {
+                backgroundColor: executing ? '#a5d6a7' : disableExecute ? '#ff1744' : '#388e3c',
+              },
+              '&.Mui-disabled': {
+                color: 'rgba(255, 255, 255, 0.8)',
+                backgroundColor: disableExecute ? 'rgba(255, 82, 82, 0.7)' : 'rgba(165, 214, 167, 0.8)',
+                opacity: 0.85,
+                filter: 'grayscale(20%)',
+              }
+            }}
+          >
+            {executing ? 'Executing...' : 'Execute'}
+          </Button>
+        </span>
+      </Tooltip>
       <input
         type="file"
         accept=".mnm"

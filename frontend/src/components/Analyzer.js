@@ -15,7 +15,15 @@ import {
   Tabs, 
   Tab, 
   CircularProgress,
-  Paper
+  Paper,
+  TextField,
+  InputAdornment,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle
 } from '@mui/material';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
@@ -35,7 +43,12 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
   const [tacCode, setTacCode] = useState('');
   const [executionError, setExecutionError] = useState('');
   const [rightPanelTab, setRightPanelTab] = useState(0);
-  
+  const [waitingForInput, setWaitingForInput] = useState(false);
+  const [inputPrompt, setInputPrompt] = useState('');
+  const [executionId, setExecutionId] = useState(null);
+  const [userInput, setUserInput] = useState('');
+  const [inputDialogOpen, setInputDialogOpen] = useState(false);
+
   const theme = useTheme();
 
   const handleTabChange = (event, newValue) => {
@@ -85,6 +98,9 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     setProgramOutput('');
     setTacCode('');
     setExecutionError('');
+    setWaitingForInput(false);
+    setInputPrompt('');
+    setExecutionId(null);
     
     // Switch to the Program Output tab when executing
     setRightPanelTab(1);
@@ -92,10 +108,21 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     axios.post('http://localhost:5000/executeCode', { code })
       .then((response) => {
         const data = response.data;
+        console.log("Execute response:", data); // Debug log
+        
         if (data.success) {
           setProgramOutput(data.output || 'Program executed successfully with no output.');
           setTacCode(data.formattedTAC || '');
           setExecutionError('');
+          
+          // Check for waiting input
+          if (data.waitingForInput) {
+            console.log("Waiting for input with prompt:", data.inputPrompt);
+            setWaitingForInput(true);
+            setInputPrompt(data.inputPrompt);
+            setExecutionId(data.executionId);
+            setInputDialogOpen(true);  // Open the dialog when input is requested
+          }
         } else {
           setProgramOutput('');
           setTacCode(data.formattedTAC || '');
@@ -114,6 +141,86 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
         setExecutionError('Failed to connect to the server: ' + error.message);
         setExecuting(false);
       });
+  };
+ 
+  // Add this function to handle input submission
+  const handleInputSubmit = (userInput) => {
+    if (!executionId) return;
+    
+    setExecuting(true);
+    
+    // Add the input to the program output
+    setProgramOutput((prev) => `${prev}\n${inputPrompt} ${userInput}`);
+    
+    console.log(`Submitting input: '${userInput}' for execution ${executionId}`);
+    
+    // Send the input back to the server
+    axios.post('http://localhost:5000/executeCode', {
+      code, // Send the code again for reference
+      executionId,
+      userInput
+    })
+    .then((response) => {
+      const data = response.data;
+      console.log("Input response:", data); // Debug log
+      
+      if (data.success) {
+        // Append new output if there is any
+        if (data.output && data.output.trim()) {
+          setProgramOutput((prev) => `${prev}\n${data.output}`);
+        }
+        
+        // Update TAC code
+        if (data.formattedTAC) {
+          setTacCode(data.formattedTAC);
+        }
+        
+        setExecutionError('');
+        
+        // Check if execution is still waiting for more input
+        if (data.waitingForInput) {
+          setWaitingForInput(true);
+          setInputPrompt(data.inputPrompt);
+          setExecutionId(data.executionId);
+          setInputDialogOpen(true); // Open the dialog again if more input is needed
+        } else {
+          setWaitingForInput(false);
+          setInputPrompt('');
+          setExecutionId(null);
+        }
+      } else {
+        setExecutionError(data.error || 'An unknown error occurred');
+        setWaitingForInput(false);
+        setInputPrompt('');
+        setExecutionId(null);
+      }
+      
+      // Show the terminal output
+      if (data.terminalOutput) {
+        setTerminalOutput((prev) => `${prev}\n--- Input Processing ---\n${data.terminalOutput}`);
+      }
+      
+      setExecuting(false);
+    })
+    .catch((error) => {
+      console.error('Error processing input:', error);
+      setExecutionError('Failed to process input: ' + error.message);
+      setWaitingForInput(false);
+      setInputPrompt('');
+      setExecutionId(null);
+      setExecuting(false);
+    });
+  };
+ 
+  const handleInputDialogSubmit = () => {
+    // Use the existing handleInputSubmit with the current userInput
+    handleInputSubmit(userInput);
+    
+    // Close the dialog
+    setInputDialogOpen(false);
+    
+    // Clear the input field for next time
+    setUserInput('');
   };
   
   const handleClear = () => {
@@ -267,6 +374,8 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
             onLoadFile={handleLoadFile}
             onSaveFile={handleSaveFile}
             onExecute={handleExecute}
+            disableExecute={errors.length > 0}
+            executing={executing}
           />
           
           {/* Unified Error Messages */}
@@ -406,6 +515,111 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                           >
                             {programOutput}
                           </Box>
+                          {/* Input field for get() operations */}
+                          {waitingForInput && (
+                            <Box 
+                              sx={{ 
+                                mt: 3, 
+                                p: 2, 
+                                backgroundColor: theme.palette.mode === 'dark' ? '#222' : '#e8e8e8',
+                                borderRadius: 1,
+                                border: `1px solid ${theme.palette.mode === 'dark' ? '#444' : '#ccc'}`,
+                              }}
+                            >
+                              <Typography 
+                                variant="subtitle2" 
+                                sx={{ 
+                                  mb: 1, 
+                                  fontWeight: 'bold',
+                                  color: theme.palette.mode === 'dark' ? '#4CAF50' : '#2E7D32',
+                                }}
+                              >
+                                Input Requested
+                              </Typography>
+                              <Typography variant="body2" sx={{ mb: 2 }}>
+                                {inputPrompt || "Enter value:"}
+                              </Typography>
+                              <TextField
+                                fullWidth
+                                variant="outlined"
+                                value={userInput}
+                                onChange={(e) => setUserInput(e.target.value)}
+                                onKeyPress={(event) => {
+                                  if (event.key === 'Enter') {
+                                    handleInputSubmit(userInput);
+                                    setUserInput('');
+                                    event.preventDefault();
+                                  }
+                                }}
+                                size="small"
+                                InputProps={{
+                                  endAdornment: (
+                                    <InputAdornment position="end">
+                                      <Button 
+                                        variant="contained" 
+                                        color="primary"
+                                        size="small" 
+                                        onClick={() => {
+                                          handleInputSubmit(userInput);
+                                          setUserInput('');
+                                        }}
+                                        sx={{ ml: 1 }}
+                                      >
+                                        Submit
+                                      </Button>
+                                    </InputAdornment>
+                                  ),
+                                }}
+                                autoFocus
+                              />
+                            </Box>
+                          )}
+                          {/* Input Dialog Modal */}
+                          <Dialog 
+                            open={inputDialogOpen} 
+                            onClose={() => {/* Do nothing to force the user to input */}}
+                            fullWidth
+                            maxWidth="sm"
+                            TransitionProps={{
+                              onEntered: () => {
+                                // Focus the input field when the dialog opens
+                                const inputField = document.querySelector('#user-input-field');
+                                if (inputField) inputField.focus();
+                              }
+                            }}
+                          >
+                            <DialogTitle sx={{ fontWeight: 'bold' }}>Input Required</DialogTitle>
+                            <DialogContent>
+                              <DialogContentText sx={{ mb: 2 }}>
+                                {inputPrompt || "Enter value:"}
+                              </DialogContentText>
+                              <TextField
+                                id="user-input-field"
+                                autoFocus
+                                margin="dense"
+                                fullWidth
+                                variant="outlined"
+                                value={userInput}
+                                onChange={(e) => setUserInput(e.target.value)}
+                                onKeyPress={(event) => {
+                                  if (event.key === 'Enter') {
+                                    handleInputDialogSubmit();
+                                    event.preventDefault();
+                                  }
+                                }}
+                                sx={{ mt: 1 }}
+                              />
+                            </DialogContent>
+                            <DialogActions>
+                              <Button 
+                                onClick={handleInputDialogSubmit}
+                                variant="contained" 
+                                color="primary"
+                              >
+                                Submit
+                              </Button>
+                            </DialogActions>
+                          </Dialog>
                         </Box>
                       ) : (
                         <Box

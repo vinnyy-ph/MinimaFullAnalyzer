@@ -1,3 +1,4 @@
+# backend/CodegenTAC/code_generator.py (fixed version)
 from lark import Visitor
 import uuid
 
@@ -12,6 +13,26 @@ class TACGenerator(Visitor):
         # For control flow
         self.loop_stack = []
         self.control_stack = []
+        # Type tracking for variables
+        self.variable_types = {}
+        # Initialize values dictionary for node evaluation
+        self.values = {}
+
+    def push_loop(self, start_label, end_label):
+        """Push a new loop context onto the stack."""
+        self.loop_stack.append((start_label, end_label))
+
+    def pop_loop(self):
+        """Pop the most recent loop context from the stack."""
+        if self.loop_stack:
+            return self.loop_stack.pop()
+        return None
+
+    def get_current_loop_labels(self):
+        """Get the labels for the current innermost loop."""
+        if self.loop_stack:
+            return self.loop_stack[-1]
+        return None, None
 
     def get_temp(self):
         """Generate a new temporary variable name."""
@@ -34,8 +55,30 @@ class TACGenerator(Visitor):
         self.instructions = []
         self.temp_counter = 0
         self.label_counter = 0
+        self.variable_types = {}
+        self.values = {}  # Reset values dict
         self.visit(tree)
         return self.instructions
+
+    def get_type(self, node_or_value):
+        """Attempt to determine the type of a node or value."""
+        if isinstance(node_or_value, tuple) and len(node_or_value) >= 2:
+            # It's already a type-value tuple from visit_token
+            return node_or_value[0]
+        elif isinstance(node_or_value, str) and node_or_value in self.variable_types:
+            # It's a variable name
+            return self.variable_types[node_or_value]
+        elif isinstance(node_or_value, str):
+            return "id"  # Default for variable names
+        elif isinstance(node_or_value, int):
+            return "integer"
+        elif isinstance(node_or_value, float):
+            return "point"
+        elif isinstance(node_or_value, bool):
+            return "state"
+        elif isinstance(node_or_value, str) and (node_or_value.startswith('"') and node_or_value.endswith('"')):
+            return "text"
+        return "unknown"
 
     def visit(self, tree):
         """Visit a node in the parse tree."""
@@ -60,11 +103,11 @@ class TACGenerator(Visitor):
     def visit_token(self, token):
         """Visit a token node."""
         if token.type == 'TEXTLITERAL':
-            return ('string', token.value.strip('"'))
+            return ('text', token.value.strip('"'))
         elif token.type == 'INTEGERLITERAL':
-            return ('int', int(token.value))
+            return ('integer', int(token.value))
         elif token.type == 'NEGINTEGERLITERAL':
-            return ('int', -int(token.value[1:]))
+            return ('integer', -int(token.value[1:]))
         elif token.type == 'POINTLITERAL':
             return ('float', float(token.value))
         elif token.type == 'NEGPOINTLITERAL':
@@ -103,10 +146,16 @@ class TACGenerator(Visitor):
             if hasattr(node.children[2], 'data') and node.children[2].data == 'var_init':
                 if len(node.children[2].children) > 0:
                     init_expr = self.visit(node.children[2].children[1])
-                    if isinstance(init_expr, tuple) and init_expr[0] in ('id','int','float','bool','string'):
+                    if isinstance(init_expr, tuple) and init_expr[0] in ('id','integer','float','bool','string','text'):
                         self.emit('ASSIGN', init_expr[1], None, var_name)
+                        # Track variable type
+                        self.variable_types[var_name] = init_expr[0]
                     else:
                         self.emit('ASSIGN', init_expr, None, var_name)
+                        # Try to infer type if possible
+                        if isinstance(init_expr, str) and init_expr.startswith('t'):
+                            # It's a temporary variable, try to track its type
+                            pass
         
         # Visit the var_list tail if present
         if len(node.children) > 3 and node.children[3]:
@@ -123,10 +172,13 @@ class TACGenerator(Visitor):
         
         if len(node.children) >= 3 and node.children[2]:
             init_expr = self.visit(node.children[2])
-            if isinstance(init_expr, tuple) and init_expr[0] in ('id','int','float','bool','string'):
+            if isinstance(init_expr, tuple) and init_expr[0] in ('id','integer','float','bool','string','text'):
                 self.emit('ASSIGN', init_expr[1], None, var_name)
+                # Track variable type
+                self.variable_types[var_name] = init_expr[0]
             else:
                 self.emit('ASSIGN', init_expr, None, var_name)
+                # Try to infer type if possible
         
         # Recursively process more variables
         if len(node.children) > 3 and node.children[3]:
@@ -147,22 +199,86 @@ class TACGenerator(Visitor):
     def visit_variable_value(self, node):
         """Visit a variable value node."""
         if not node.children:
-            return ('null', None)
+            return ('empty', None)
         
         # GET operation
         if hasattr(node.children[0], 'type') and node.children[0].type == 'GET':
             prompt_expr = None
             if len(node.children) >= 3:
                 prompt_expr = self.visit(node.children[2])
+            
             temp = self.get_temp()
-            self.emit('INPUT', prompt_expr[1] if isinstance(prompt_expr, tuple) else "Enter a value", None, temp)
-            return temp
+            
+            # Handle different types of prompt expressions
+            if isinstance(prompt_expr, tuple) and len(prompt_expr) >= 2:
+                # If it's a tuple like ('text', 'Enter value')
+                prompt_value = prompt_expr[1]
+            elif isinstance(prompt_expr, str):
+                # If it's a string literal
+                prompt_value = prompt_expr
+            else:
+                # Default prompt
+                prompt_value = "Enter value"
+                
+            # Emit INPUT instruction with the prompt
+            self.emit('INPUT', prompt_value, None, temp)
+            
+            # Return as a text type since input is always treated as text
+            return ('text', temp)
+        
+        # Check if this is a list literal
+        if hasattr(node.children[0], 'type') and node.children[0].type == 'LSQB':
+            # This is a list literal [...]
+            if len(node.children) > 1:
+                # Visit the list_value node to get the list items
+                return self.visit(node.children[1])
         
         # List or expression
         return self.visit(node.children[0])
 
-    def visit_expression(self, node):
+    def visit_list_value(self, node):
+        """Handle list literals [expr, expr, ...]."""
+        # Create a temporary for the list
+        temp = self.get_temp()
+        
+        # Emit an instruction to create an empty list
+        self.emit('LIST_CREATE', None, None, temp)
+        
+        # Add the first item
+        first_item = self.visit(node.children[0])
+        self.emit('LIST_APPEND', temp, first_item, None)
+        
+        # If there's a list_tail, visit it
+        if len(node.children) > 1:
+            self.visit_list_tail(node.children[1], temp)
+        
+        return temp
+
+    def visit_list_tail(self, node, list_temp):
+        """Handle additional items in a list literal."""
+        if not node or not hasattr(node, 'children'):
+            return
+        
+        # Skip the COMMA (first child) and add the expression (second child)
+        if len(node.children) >= 2:
+            item = self.visit(node.children[1])
+            self.emit('LIST_APPEND', list_temp, item, None)
+        
+        # Process more items if they exist
+        if len(node.children) > 2:
+            self.visit_list_tail(node.children[2], list_temp)
+
+    def visit_get_operand(self, node):
+        """Visit a get_operand node (prompt inside get)."""
+        if not node.children:
+            return ('text', "Enter value")
+        
         return self.visit(node.children[0])
+
+    def visit_expression(self, node):
+        """Visit an expression node."""
+        result = self.visit(node.children[0])
+        return result
 
     def visit_logical_or_expr(self, node):
         children = node.children
@@ -237,15 +353,47 @@ class TACGenerator(Visitor):
         left = self.visit(children[0])
         i = 1
         while i < len(children):
-            op = node.children[i].value
+            op = children[i].value  # PLUS or MINUS
             right = self.visit(children[i+1])
             temp = self.get_temp()
+            
+            # Get operand values
             left_operand = left[1] if isinstance(left, tuple) else left
             right_operand = right[1] if isinstance(right, tuple) else right
+            
+            # Get operand types
+            left_type = left[0] if isinstance(left, tuple) else self.get_type(left)
+            right_type = right[0] if isinstance(right, tuple) else self.get_type(right)
+            
+            # Handle different operand types
             if op == "+":
-                self.emit('ADD', left_operand, right_operand, temp)
-            else:
-                self.emit('SUB', left_operand, right_operand, temp)
+                # Special handling for text concatenation
+                if left_type == "text" or right_type == "text":
+                    # For text concatenation, use CONCAT operation instead of ADD
+                    self.emit('CONCAT', left_operand, right_operand, temp)
+                    # Track the result as text type
+                    self.variable_types[temp] = "text"
+                else:
+                    # Normal addition for numeric types
+                    self.emit('ADD', left_operand, right_operand, temp)
+                    # If either operand is a point, result is a point
+                    if left_type == "point" or right_type == "point" or left_type == "float" or right_type == "float":
+                        self.variable_types[temp] = "point"
+                    else:
+                        self.variable_types[temp] = "integer"
+            else:  # op == "-"
+                # No subtraction for text
+                if left_type == "text" or right_type == "text":
+                    # Generate an error instruction or a placeholder
+                    self.emit('ERROR', "Cannot subtract from text", None, temp)
+                else:
+                    self.emit('SUB', left_operand, right_operand, temp)
+                    # If either operand is a point, result is a point
+                    if left_type == "point" or right_type == "point" or left_type == "float" or right_type == "float":
+                        self.variable_types[temp] = "point"
+                    else:
+                        self.variable_types[temp] = "integer"
+            
             left = temp
             i += 2
         return left
@@ -255,17 +403,39 @@ class TACGenerator(Visitor):
         left = self.visit(children[0])
         i = 1
         while i < len(children):
-            op = node.children[i].value
+            op = children[i].value
             right = self.visit(children[i+1])
             temp = self.get_temp()
+            
+            # Get operand values
             left_operand = left[1] if isinstance(left, tuple) else left
             right_operand = right[1] if isinstance(right, tuple) else right
-            if op == "*":
-                self.emit('MUL', left_operand, right_operand, temp)
-            elif op == "/":
-                self.emit('DIV', left_operand, right_operand, temp)
+            
+            # Get operand types
+            left_type = left[0] if isinstance(left, tuple) else self.get_type(left)
+            right_type = right[0] if isinstance(right, tuple) else self.get_type(right)
+            
+            # Handle different operand types
+            if left_type == "text" or right_type == "text":
+                # Text doesn't support multiplication, division, or modulo
+                self.emit('ERROR', f"Cannot use {op} with text", None, temp)
             else:
-                self.emit('MOD', left_operand, right_operand, temp)
+                if op == "*":
+                    self.emit('MUL', left_operand, right_operand, temp)
+                elif op == "/":
+                    self.emit('DIV', left_operand, right_operand, temp)
+                    # Division always results in a point (float)
+                    self.variable_types[temp] = "point"
+                else:  # op == "%"
+                    self.emit('MOD', left_operand, right_operand, temp)
+                
+                # Set the result type for * and % operations
+                if op != "/" and (left_type == "point" or right_type == "point" or 
+                                left_type == "float" or right_type == "float"):
+                    self.variable_types[temp] = "point"
+                elif op != "/":
+                    self.variable_types[temp] = "integer"
+            
             left = temp
             i += 2
         return left
@@ -280,8 +450,15 @@ class TACGenerator(Visitor):
         operand = expr[1] if isinstance(expr, tuple) else expr
         if op == "!":
             self.emit('NOT', operand, None, temp)
+            self.variable_types[temp] = "state"
         else:  # "~"
             self.emit('NEG', operand, None, temp)
+            # Determine result type based on operand
+            expr_type = expr[0] if isinstance(expr, tuple) else self.get_type(expr)
+            if expr_type == "point" or expr_type == "float":
+                self.variable_types[temp] = "point"
+            else:
+                self.variable_types[temp] = "integer"
         return temp
 
     def visit_primary_expr(self, node):
@@ -299,9 +476,36 @@ class TACGenerator(Visitor):
     def visit_id_usage(self, node):
         var_name = node.children[0].value
         
-        # function call?
+        # Function call?
         if len(node.children) > 1 and hasattr(node.children[1], 'data') and node.children[1].data == 'func_call':
-            # gather args
+            # Handle get() function specially
+            if var_name == 'get':
+                # Get prompt (default if none provided)
+                prompt = "Enter value"
+                
+                # Extract prompt from arguments if available
+                if len(node.children[1].children) > 1:
+                    args_node = node.children[1].children[1]
+                    if hasattr(args_node, 'data') and args_node.data == 'args' and args_node.children:
+                        prompt_expr = self.visit(args_node.children[0])
+                        # More thorough type checking for the prompt expression
+                        if isinstance(prompt_expr, tuple) and len(prompt_expr) >= 2:
+                            prompt_value = prompt_expr[1]  # Get the actual value from the tuple
+                            if isinstance(prompt_value, str):
+                                prompt = prompt_value
+                        elif isinstance(prompt_expr, str):
+                            # If it's a string literal with quotes
+                            if prompt_expr.startswith('"') and prompt_expr.endswith('"'):
+                                prompt = prompt_expr[1:-1]  # Remove the quotes
+                            else:
+                                prompt = prompt_expr
+                
+                # Create temp variable and emit INPUT instruction
+                temp = self.get_temp()
+                self.emit('INPUT', prompt, None, temp)
+                return ('text', temp)  # Return as text type (important!)
+            
+            # Regular function call
             args = []
             if len(node.children[1].children) > 1:
                 args_node = node.children[1].children[1]
@@ -310,64 +514,302 @@ class TACGenerator(Visitor):
                         if hasattr(child, 'type') and child.type == 'COMMA':
                             continue
                         arg_val = self.visit(child)
-                        if isinstance(arg_val, tuple):
-                            args.append(arg_val[1])
-                        else:
+                        if arg_val is not None:
                             args.append(arg_val)
-            # Emit param instructions
-            for i, a in enumerate(args):
-                self.emit('PARAM', a, None, i)
-            # Create a temp for return
+                elif hasattr(args_node, 'data') or hasattr(args_node, 'type'):
+                    # Handle single argument that's not an 'args' node
+                    arg_val = self.visit(args_node)
+                    if arg_val is not None:
+                        args.append(arg_val)
+            
+            # Emit PARAM instructions for each argument
+            for i, arg in enumerate(args):
+                # Ensure we get the actual value, not just a reference
+                if isinstance(arg, tuple) and len(arg) >= 2:
+                    self.emit('PARAM', arg[1], None, i)
+                else:
+                    self.emit('PARAM', arg, None, i)
+            
+            # Create temp for return
             ret_temp = self.get_temp()
+            # Pass the number of arguments in the call
             self.emit('CALL', var_name, len(args), ret_temp)
             return ret_temp
         
-        # normal variable usage
+        # Check for list/group access (indexing)
+        for child in node.children[1:]:
+            if hasattr(child, 'data') and child.data == 'group_or_list':
+                # This is an indexing operation
+                index_expr = self.visit(child.children[1])
+                
+                # Create a temporary variable for the result
+                temp = self.get_temp()
+                
+                # Determine if this is list or group access
+                is_list_access = child.children[0].type == "LSQB"
+                
+                if is_list_access:
+                    # Handle list indexing
+                    self.emit('LIST_ACCESS', var_name, index_expr, temp)
+                else:
+                    # Handle group access (similar to dictionary)
+                    self.emit('GROUP_ACCESS', var_name, index_expr, temp)
+                
+                return temp
+            
+            # Check for id_usagetail (which may contain a group_or_list)
+            if hasattr(child, 'data') and child.data == 'id_usagetail':
+                for subchild in child.children:
+                    if hasattr(subchild, 'data') and subchild.data == 'group_or_list' and subchild.children:
+                        # This is an indexing operation
+                        index_expr = self.visit(subchild.children[1])
+                        
+                        # Create a temporary variable for the result
+                        temp = self.get_temp()
+                        
+                        # Determine if this is list or group access
+                        is_list_access = subchild.children[0].type == "LSQB"
+                        
+                        if is_list_access:
+                            # Handle list indexing
+                            self.emit('LIST_ACCESS', var_name, index_expr, temp)
+                        else:
+                            # Handle group access (similar to dictionary)
+                            self.emit('GROUP_ACCESS', var_name, index_expr, temp)
+                        
+                        return temp
+
+            # Check if this is an increment/decrement operation
+            if subchild.data == 'unary_op':
+                if subchild.children and hasattr(subchild.children[0], 'type'):
+                    op_type = subchild.children[0].type
+                    if op_type == 'INC_OP':  # i++
+                        # Save current value to temp variable
+                        temp = self.get_temp()
+                        self.emit('ASSIGN', var_name, None, temp)
+                        
+                        # Increment the variable
+                        self.emit('ADD', var_name, 1, var_name)
+                        
+                        # Return the original value (post-increment)
+                        return temp            
+
+        # Normal variable usage
         return ('id', var_name)
 
+    def visit_id_usagetail(self, node):
+        """Handle post-increment and post-decrement operations"""
+        var_name = node.parent.children[0].value if hasattr(node, 'parent') else None
+        
+        if not var_name:
+            return None
+        
+        # Check for post-increment/decrement operators
+        for child in node.children:
+            if hasattr(child, 'data') and child.data == 'unary_op':
+                if child.children and hasattr(child.children[0], 'type'):
+                    op = child.children[0].type
+                    if op == 'INC_OP':  # i++
+                        temp = self.get_temp()
+                        # First store current value to temp
+                        self.emit('ASSIGN', var_name, None, temp)
+                        # Then increment the variable
+                        self.emit('ADD', var_name, 1, var_name)
+                        return temp
+                    elif op == 'DEC_OP':  # i--
+                        temp = self.get_temp()
+                        # First store current value to temp
+                        self.emit('ASSIGN', var_name, None, temp)
+                        # Then decrement the variable
+                        self.emit('SUB', var_name, 1, var_name)
+                        return temp
+        
+        # Handle other id_usagetail nodes (function calls, etc.)
+        return self.visit(node.children[0]) if node.children else None
+
+    def visit_group_or_list(self, node, var_name=None):
+        """Handle list or group indexing operations."""
+        if not node.children:
+            return None
+        
+        # Determine if this is list access or group access
+        is_list_access = node.children[0].type == "LSQB"
+        
+        # Get the variable name from the parent if not provided
+        if var_name is None:
+            parent = getattr(node, 'parent', None)
+            if parent and hasattr(parent, 'data') and parent.data == 'id_usage':
+                var_name = parent.children[0].value
+            else:
+                return None
+        
+        # Get the index expression
+        index_expr = self.visit(node.children[1])
+        
+        # Create a temporary variable for the result
+        temp = self.get_temp()
+        
+        # Generate appropriate access instruction
+        if is_list_access:
+            # Handle list indexing
+            self.emit('LIST_ACCESS', var_name, index_expr, temp)
+        else:
+            # Handle group access (similar to dictionary)
+            self.emit('GROUP_ACCESS', var_name, index_expr, temp)
+        
+        return temp
+
     def visit_var_assign(self, node):
-        var_name = node.children[0].value
+        children = node.children
+        var_name = children[0].value
         
-        # direct assignment
-        assign_op = node.children[1].value if hasattr(node.children[1], 'value') else '='
-        expr_val = self.visit(node.children[2])
+        # Check for list or group access
+        has_accessor = False
+        accessor_node = None
         
-        if assign_op == '=':
+        # Check if the second child is a group_or_list node
+        if len(children) > 1 and children[1] and hasattr(children[1], 'data') and children[1].data == 'group_or_list':
+            has_accessor = True
+            accessor_node = children[1]
+            
+            # Make the accessor aware of its parent
+            accessor_node.parent = node
+            
+            # Visit to validate the accessor
+            self.visit(accessor_node)
+        
+        # Determine the indices for the assignment operator and expression
+        if has_accessor:
+            assign_op_idx = 2
+            expr_idx = 3
+        else:
+            assign_op_idx = 1
+            expr_idx = 2
+        
+        # Extract the assignment operator
+        assign_op_node = children[assign_op_idx]
+        if hasattr(assign_op_node, 'data'):
+            # It's a Tree node (e.g., assign_op), extract the token from its children
+            op = assign_op_node.children[0].value
+        else:
+            # It's a token directly
+            op = assign_op_node.value if hasattr(assign_op_node, 'value') else '='
+        
+        # Get the value being assigned
+        expr_node = children[expr_idx]
+        expr_val = self.visit(expr_node)
+        
+        # Store the type of expr_val for later reference
+        if isinstance(expr_val, tuple) and len(expr_val) >= 2:
+            self.variable_types[var_name] = expr_val[0]
+        
+        # Handle different types of assignments
+        if op == '=':
             if isinstance(expr_val, tuple):
-                self.emit('ASSIGN', expr_val[1], None, var_name)
+                if expr_val[0] == 'text':
+                    # For text literals, pass the actual text value, not '='
+                    # The key fix is here - directly use the value without using f-strings
+                    # which might be causing the issue with quote preservation
+                    self.emit('ASSIGN', expr_val[1], None, var_name)
+                else:
+                    self.emit('ASSIGN', expr_val[1], None, var_name)
             else:
                 self.emit('ASSIGN', expr_val, None, var_name)
         else:
-            # e.g. +=, -=, etc.
+            # Handle compound assignments (+=, -=, etc.)
             temp = self.get_temp()
             self.emit('ASSIGN', var_name, None, temp)
             rhs = expr_val[1] if isinstance(expr_val, tuple) else expr_val
             result_temp = self.get_temp()
-            if assign_op == '+=':
-                self.emit('ADD', temp, rhs, result_temp)
-            elif assign_op == '-=':
-                self.emit('SUB', temp, rhs, result_temp)
-            elif assign_op == '*=':
-                self.emit('MUL', temp, rhs, result_temp)
-            elif assign_op == '/=':
-                self.emit('DIV', temp, rhs, result_temp)
+            
+            # Get the types for handling operations
+            var_type = self.get_type(var_name)
+            expr_type = expr_val[0] if isinstance(expr_val, tuple) else self.get_type(expr_val)
+            
+            if op == '+=':
+                # Special handling for text concatenation
+                if var_type == "text" or expr_type == "text":
+                    self.emit('CONCAT', temp, rhs, result_temp)
+                    self.variable_types[result_temp] = "text"
+                else:
+                    self.emit('ADD', temp, rhs, result_temp)
+                    if var_type == "point" or expr_type == "point" or var_type == "float" or expr_type == "float":
+                        self.variable_types[result_temp] = "point"
+                    else:
+                        self.variable_types[result_temp] = "integer"
+            elif op == '-=':
+                if var_type == "text" or expr_type == "text":
+                    # Error for text subtraction
+                    self.emit('ERROR', "Cannot subtract from text", None, result_temp)
+                else:
+                    self.emit('SUB', temp, rhs, result_temp)
+                    if var_type == "point" or expr_type == "point" or var_type == "float" or expr_type == "float":
+                        self.variable_types[result_temp] = "point"
+                    else:
+                        self.variable_types[result_temp] = "integer"
+            elif op == '*=':
+                if var_type == "text" or expr_type == "text":
+                    # Error for text multiplication
+                    self.emit('ERROR', "Cannot multiply text", None, result_temp)
+                else:
+                    self.emit('MUL', temp, rhs, result_temp)
+                    if var_type == "point" or expr_type == "point" or var_type == "float" or expr_type == "float":
+                        self.variable_types[result_temp] = "point"
+                    else:
+                        self.variable_types[result_temp] = "integer"
+            elif op == '/=':
+                if var_type == "text" or expr_type == "text":
+                    # Error for text division
+                    self.emit('ERROR', "Cannot divide text", None, result_temp)
+                else:
+                    self.emit('DIV', temp, rhs, result_temp)
+                    # Division always results in a point (float)
+                    self.variable_types[result_temp] = "point"
             else:
                 # fallback
-                pass
+                self.emit('ASSIGN', rhs, None, result_temp)
+            
             self.emit('ASSIGN', result_temp, None, var_name)
+            # Update the variable type
+            if result_temp in self.variable_types:
+                self.variable_types[var_name] = self.variable_types[result_temp]
         
         return None
 
     def visit_show_statement(self, node):
-        # show("some text");
+        """
+        Generate TAC for show statements, properly handling list indexing in arguments.
+        Structure: SHOW LPAREN expression RPAREN
+        """
+        # Get the expression inside the show() function
         expr = self.visit(node.children[2])
-        val = expr[1] if isinstance(expr, tuple) else expr
+        
+        # If expr is a temporary variable (like from LIST_ACCESS), use it directly
+        if isinstance(expr, str) and expr.startswith('t'):
+            val = expr
+        else:
+            # Otherwise, extract the value part if it's a tuple
+            val = expr[1] if isinstance(expr, tuple) and len(expr) >= 2 else expr
+        
+        # Emit PRINT instruction with the value
         self.emit('PRINT', val, None, None)
         return None
-
+    
     def visit_func_definition(self, node):
         # function: func identifier(...) { ... }
         func_name = node.children[1].value
+        
+        # Extract parameter names
+        param_names = []
+        param_node = node.children[3]
+        if hasattr(param_node, 'children'):
+            # Multiple parameters
+            for child in param_node.children:
+                if hasattr(child, 'type') and child.type == 'IDENTIFIER':
+                    param_names.append(child.value)
+        elif hasattr(param_node, 'type') and param_node.type == 'IDENTIFIER':
+            # Single parameter
+            param_names.append(param_node.value)
         
         # Create labels for function
         func_label = self.get_label()
@@ -377,8 +819,8 @@ class TACGenerator(Visitor):
         # GOTO skip_label so we don't execute the function body now
         self.emit('GOTO', None, None, skip_label)
 
-        # Mark function start
-        self.emit('FUNCTION', func_name, None, func_label)
+        # Mark function start with parameter names
+        self.emit('FUNCTION', func_name, param_names, func_label)
         self.emit('LABEL', None, None, func_label)
 
         # visit body
@@ -394,12 +836,14 @@ class TACGenerator(Visitor):
         return None
 
     def visit_throw_statement(self, node):
+        """
+        Generate TAC for throw statement (function return)
+        """
         expr = self.visit(node.children[1])
-        if isinstance(expr, tuple):
-            self.emit('RETURN', expr[1], None, None)
-        else:
-            self.emit('RETURN', expr, None, None)
+        val = expr[1] if isinstance(expr, tuple) else expr
+        self.emit('RETURN', val, None, None)
         return None
+
 
     def visit_function_prog(self, node):
         for child in node.children:
@@ -410,22 +854,823 @@ class TACGenerator(Visitor):
         target_type = node.children[0].value.lower()
         expr = self.visit(node.children[2])
         temp = self.get_temp()
+        
+        # Track the type of the result
+        self.variable_types[temp] = target_type
+        
         # In a real system, you'd have dedicated instructions or a type system
-        self.emit('ASSIGN', expr[1] if isinstance(expr, tuple) else expr, None, temp)
-        return temp
-
-    def visit_control_flow(self, node):
-        stmt_type = node.children[0].value.lower()  # "exit" or "next"
-        if not self.loop_stack:
-            return None
-        start_label, end_label = self.loop_stack[-1]
-        if stmt_type == "exit":
-            self.emit('GOTO', None, None, end_label)
+        if isinstance(expr, tuple):
+            self.emit('TYPECAST', expr[1], target_type, temp)
         else:
-            self.emit('GOTO', None, None, start_label)
-        return None
+            self.emit('TYPECAST', expr, target_type, temp)
+        return temp
 
     def visit_loop_block(self, node):
         for child in node.children:
             self.visit(child)
+        return None
+
+    def visit_checkif_statement(self, node):
+        """Generate TAC for if statements (checkif)."""
+        # Generate labels for different parts of the control flow
+        else_label = self.get_label()
+        end_label = self.get_label()
+        
+        # Evaluate the condition
+        condition = self.visit(node.children[2])
+        
+        # Generate branch instruction - if condition is false, skip to else block
+        self.emit('IFFALSE', condition, None, else_label)
+        
+        # Visit the if block
+        self.visit(node.children[5])  # program_block
+        
+        # After executing the if block, skip the else block
+        self.emit('GOTO', None, None, end_label)
+        
+        # Label for the else part (recheck or otherwise)
+        self.emit('LABEL', None, None, else_label)
+        
+        # Visit recheck (else if) and otherwise (else) if present
+        for child in node.children[6:]:
+            if child and hasattr(child, 'data'):
+                if child.data == 'recheck_statement':
+                    self.visit_recheck_statement(child, end_label)
+                elif child.data == 'otherwise_statement':
+                    self.visit_otherwise_statement(child)
+        
+        # Label for the end of the if statement
+        self.emit('LABEL', None, None, end_label)
+        
+        return None
+
+    def visit_recheck_statement(self, node, end_label):
+        """Generate TAC for else-if statements (recheck)."""
+        if not node or not hasattr(node, 'children') or len(node.children) < 5:
+            return None
+        
+        # Generate label for the next else-if part
+        next_else_label = self.get_label()
+        
+        # Evaluate the condition
+        condition = self.visit(node.children[2])
+        
+        # Generate branch instruction - if condition is false, skip to next else block
+        self.emit('IFFALSE', condition, None, next_else_label)
+        
+        # Visit the else-if block
+        self.visit(node.children[5])  # program_block
+        
+        # After executing the else-if block, skip to the end
+        self.emit('GOTO', None, None, end_label)
+        
+        # Label for the next else part
+        self.emit('LABEL', None, None, next_else_label)
+        
+        # Visit next recheck statement if present
+        if len(node.children) > 7 and node.children[7]:
+            self.visit_recheck_statement(node.children[7], end_label)
+        
+        return None
+    
+    def visit_otherwise_statement(self, node):
+        """
+        Generate TAC for else statements (otherwise).
+        Structure: OTHERWISE LBRACE program_block RBRACE
+        """
+        # If this node is empty or doesn't have enough children, skip
+        if not node or not hasattr(node, 'children') or len(node.children) < 3:
+            return None
+        
+        # Visit the else block
+        self.visit(node.children[2])  # program_block
+        
+        return None
+
+    def visit_repeat_statement(self, node):
+        """
+        Generate TAC for repeat loops (while loops).
+        Structure: REPEAT LPAREN expression RPAREN LBRACE loop_block RBRACE
+        """
+        # Generate simplified labels
+        start_label = self.get_label()
+        end_label = self.get_label()
+        
+        # Save these labels for loop control
+        self.loop_stack.append((start_label, end_label))
+        
+        # 1. Loop start (check condition)
+        self.emit('LABEL', None, None, start_label)
+        
+        # 2. Get condition result
+        condition = self.visit(node.children[2])
+        
+        # 3. Exit loop if condition is false
+        self.emit('IFFALSE', condition, None, end_label)
+        
+        # 4. Execute loop body
+        self.visit(node.children[4])  # loop_block
+        
+        # 5. Go back to condition check
+        self.emit('GOTO', None, None, start_label)
+        
+        # 6. Loop exit point
+        self.emit('LABEL', None, None, end_label)
+        
+        # Clean up
+        self.loop_stack.pop()
+        
+        return None
+
+    def visit_do_repeat_statement(self, node):
+        """
+        Generate TAC for do-repeat loops (do-while loops).
+        Structure: DO LBRACE loop_block RBRACE REPEAT LPAREN expression RPAREN
+        """
+        # Generate simplified labels
+        start_label = self.get_label()
+        cond_label = self.get_label()
+        end_label = self.get_label()
+        
+        # Save these labels for loop control
+        self.loop_stack.append((cond_label, end_label))
+        
+        # 1. Loop start
+        self.emit('LABEL', None, None, start_label)
+        
+        # 2. Execute loop body first (do-while executes at least once)
+        self.visit(node.children[2])  # loop_block
+        
+        # 3. Check condition
+        self.emit('LABEL', None, None, cond_label)
+        condition = self.visit(node.children[6])
+        
+        # 4. Go back to start if condition is true
+        self.emit('IFTRUE', condition, None, start_label)
+        
+        # 5. Loop exit point
+        self.emit('LABEL', None, None, end_label)
+        
+        # Clean up
+        self.loop_stack.pop()
+        
+        return None
+
+    def visit_control_flow(self, node):
+        """
+        Handle exit and next statements in loops.
+        """
+        stmt_type = node.children[0].value.lower()  # "exit" or "next"
+        
+        # Verify we're inside a loop
+        if not self.loop_stack:
+            return None
+        
+        # Get current loop's labels
+        start_label, end_label = self.loop_stack[-1]
+        
+        # Handle exit (jump to end of loop)
+        if stmt_type == "exit":
+            self.emit('GOTO', None, None, end_label)
+        # Handle next (jump to start of loop)
+        else:  # next
+            self.emit('GOTO', None, None, start_label)
+        
+        return None
+    
+    def visit_each_statement(self, node):
+        """
+        Generate TAC for each loops (for loops).
+        Structure: EACH LPAREN each_initialization expression SEMICOLON (expression | var_assign) RPAREN LBRACE loop_block RBRACE
+        """
+        # Generate labels
+        loop_start = self.get_label()
+        loop_end = self.get_label()
+        
+        # Save labels for control flow
+        self.loop_stack.append((loop_start, loop_end))
+        
+        # 1. Initialize loop variable
+        self.visit(node.children[2])  # each_initialization
+        
+        # 2. Start of loop - condition check
+        self.emit('LABEL', None, None, loop_start)
+        
+        # 3. Evaluate condition - must generate proper comparison code
+        condition_node = node.children[3]
+        condition_result = self.visit(condition_node)
+        
+        # Ensure condition is properly evaluated
+        if isinstance(condition_result, tuple):
+            condition_val = condition_result[1]
+        else:
+            condition_val = condition_result
+        
+        # 4. Exit if condition is false
+        self.emit('IFFALSE', condition_val, None, loop_end)
+        
+        # 5. Execute loop body
+        self.visit(node.children[7])  # loop_block
+        
+        # 6. Execute update expression
+        self.visit(node.children[5])  # update expression
+        
+        # 7. Jump back to condition check
+        self.emit('GOTO', None, None, loop_start)
+        
+        # 8. Loop exit point
+        self.emit('LABEL', None, None, loop_end)
+        
+        # Clean up
+        self.loop_stack.pop()
+        
+        return None
+
+    def visit_repeat_statement(self, node):
+        """
+        Generate TAC for repeat loops (while loops).
+        Structure: REPEAT LPAREN expression RPAREN LBRACE loop_block RBRACE
+        """
+        # Generate labels
+        loop_start = self.get_label()
+        loop_end = self.get_label()
+        
+        # Save labels for control flow
+        self.loop_stack.append((loop_start, loop_end))
+        
+        # 1. Start of loop - condition check
+        self.emit('LABEL', None, None, loop_start)
+        
+        # 2. Evaluate condition fresh for each iteration
+        condition_temp = self.visit(node.children[2])
+        
+        # 3. Exit if condition is false
+        self.emit('IFFALSE', condition_temp, None, loop_end)
+        
+        # 4. Execute loop body
+        # Find the loop body node
+        loop_body_found = False
+        for i, child in enumerate(node.children):
+            if hasattr(child, 'data') and child.data == 'loop_block':
+                self.visit(child)
+                loop_body_found = True
+                break
+        
+        # If we couldn't find it by data type, try by position
+        if not loop_body_found:
+            loop_body_index = 4  # Most likely position based on grammar
+            if len(node.children) > loop_body_index:
+                self.visit(node.children[loop_body_index])
+        
+        # 5. Jump back to start for next iteration
+        self.emit('GOTO', None, None, loop_start)
+        
+        # 6. Loop exit point
+        self.emit('LABEL', None, None, loop_end)
+        
+        # Clean up
+        self.loop_stack.pop()
+        
+        return None
+
+    def visit_do_repeat_statement(self, node):
+        """
+        Generate TAC for do-repeat loops (do-while loops).
+        Structure: DO LBRACE loop_block RBRACE REPEAT LPAREN expression RPAREN
+        """
+        # Generate labels
+        loop_start = self.get_label()
+        loop_cond = self.get_label()
+        loop_end = self.get_label()
+        
+        # Save labels for control flow
+        self.loop_stack.append((loop_start, loop_end))
+        
+        # 1. Start of loop
+        self.emit('LABEL', None, None, loop_start)
+        
+        # 2. Execute loop body
+        # Find the loop body node
+        loop_body_found = False
+        for i, child in enumerate(node.children):
+            if hasattr(child, 'data') and child.data == 'loop_block':
+                self.visit(child)
+                loop_body_found = True
+                break
+        
+        # If we couldn't find it by data type, try by position
+        if not loop_body_found:
+            loop_body_index = 2  # Most likely position based on grammar
+            if len(node.children) > loop_body_index:
+                self.visit(node.children[loop_body_index])
+        
+        # 3. Condition check label
+        self.emit('LABEL', None, None, loop_cond)
+        
+        # 4. Evaluate condition - must be fresh each iteration
+        condition_node_index = 6  # Expected position of condition expression
+        condition_temp = self.visit(node.children[condition_node_index])
+        
+        # 5. Go back to start if condition is true
+        self.emit('IFTRUE', condition_temp, None, loop_start)
+        
+        # 6. Exit point
+        self.emit('LABEL', None, None, loop_end)
+        
+        # Clean up
+        self.loop_stack.pop()
+        
+        return None
+
+    def visit_control_flow(self, node):
+        """
+        Handle exit and next statements within loops.
+        """
+        stmt_type = node.children[0].value.lower()  # "exit" or "next"
+        
+        # Require being in a loop context
+        if not self.loop_stack:
+            # Not in a loop, but we'll still generate code to avoid errors
+            return None
+        
+        # Get the appropriate labels from the current loop
+        start_label, end_label = self.loop_stack[-1][:2]
+        
+        if stmt_type == "exit":
+            # Jump to the end of the loop
+            self.emit('GOTO', None, None, end_label)
+        else:  # next
+            # Jump back to the start (condition check)
+            self.emit('GOTO', None, None, start_label)
+        
+        return None
+    
+    def visit_each_func_statement(self, node):
+        """
+        Generate TAC for each loops within functions.
+        Structure: EACH LPAREN each_initialization expression SEMICOLON (expression | var_assign) RPAREN LBRACE func_loop_block RBRACE
+        """
+        # Generate labels
+        loop_start = self.get_label()
+        loop_end = self.get_label()
+        
+        # Save labels for control flow
+        self.loop_stack.append((loop_start, loop_end))
+        
+        # 1. Initialize loop variable
+        self.visit(node.children[2])  # each_initialization
+        
+        # 2. Start of loop - condition check
+        self.emit('LABEL', None, None, loop_start)
+        
+        # 3. Evaluate condition - CRITICAL: This must happen at the start of EACH iteration
+        # Visit the condition node to generate its evaluation code
+        condition_temp = self.visit(node.children[3])
+        
+        # 4. Exit if condition is false
+        self.emit('IFFALSE', condition_temp, None, loop_end)
+        
+        # 5. Execute loop body
+        # Find the func_loop_block node
+        loop_body_found = False
+        for i, child in enumerate(node.children):
+            if hasattr(child, 'data') and child.data == 'func_loop_block':
+                self.visit(child)
+                loop_body_found = True
+                break
+        
+        # If we couldn't find it by data type, try by position
+        if not loop_body_found:
+            loop_body_index = 7  # Most likely position based on grammar
+            if len(node.children) > loop_body_index:
+                self.visit(node.children[loop_body_index])
+        
+        # 6. Execute update expression
+        self.visit(node.children[5])  # update expression
+        
+        # 7. Jump back to start for next iteration
+        self.emit('GOTO', None, None, loop_start)
+        
+        # 8. Loop exit point
+        self.emit('LABEL', None, None, loop_end)
+        
+        # Clean up
+        self.loop_stack.pop()
+        
+        return None
+
+    def visit_repeat_func_statement(self, node):
+        """
+        Generate TAC for repeat loops within functions.
+        Structure: REPEAT LPAREN expression RPAREN LBRACE func_loop_block RBRACE
+        """
+        # Generate labels
+        loop_start = self.get_label()
+        loop_end = self.get_label()
+        
+        # Save labels for control flow
+        self.loop_stack.append((loop_start, loop_end))
+        
+        # 1. Start of loop - condition check
+        self.emit('LABEL', None, None, loop_start)
+        
+        # 2. Evaluate condition fresh for each iteration
+        condition_temp = self.visit(node.children[2])
+        
+        # 3. Exit if condition is false
+        self.emit('IFFALSE', condition_temp, None, loop_end)
+        
+        # 4. Execute loop body
+        # Find the func_loop_block node
+        loop_body_found = False
+        for i, child in enumerate(node.children):
+            if hasattr(child, 'data') and child.data == 'func_loop_block':
+                self.visit(child)
+                loop_body_found = True
+                break
+        
+        # If we couldn't find it by data type, try by position
+        if not loop_body_found:
+            loop_body_index = 4  # Most likely position based on grammar
+            if len(node.children) > loop_body_index:
+                self.visit(node.children[loop_body_index])
+        
+        # 5. Jump back to start for next iteration
+        self.emit('GOTO', None, None, loop_start)
+        
+        # 6. Loop exit point
+        self.emit('LABEL', None, None, loop_end)
+        
+        # Clean up
+        self.loop_stack.pop()
+        
+        return None
+
+    def visit_do_repeat_func_statement(self, node):
+        """
+        Generate TAC for do-repeat loops within functions.
+        Structure: DO LBRACE func_loop_block RBRACE REPEAT LPAREN expression RPAREN
+        """
+        # Generate labels
+        loop_start = self.get_label()
+        loop_cond = self.get_label()
+        loop_end = self.get_label()
+        
+        # Save labels for control flow
+        self.loop_stack.append((loop_start, loop_end))
+        
+        # 1. Start of loop
+        self.emit('LABEL', None, None, loop_start)
+        
+        # 2. Execute loop body
+        # Find the func_loop_block node
+        loop_body_found = False
+        for i, child in enumerate(node.children):
+            if hasattr(child, 'data') and child.data == 'func_loop_block':
+                self.visit(child)
+                loop_body_found = True
+                break
+        
+        # If we couldn't find it by data type, try by position
+        if not loop_body_found:
+            loop_body_index = 2  # Most likely position based on grammar
+            if len(node.children) > loop_body_index:
+                self.visit(node.children[loop_body_index])
+        
+        # 3. Condition check label
+        self.emit('LABEL', None, None, loop_cond)
+        
+        # 4. Evaluate condition - must be fresh each iteration
+        condition_node_index = 6  # Expected position of condition expression
+        condition_temp = self.visit(node.children[condition_node_index])
+        
+        # 5. Go back to start if condition is true
+        self.emit('IFTRUE', condition_temp, None, loop_start)
+        
+        # 6. Exit point
+        self.emit('LABEL', None, None, loop_end)
+        
+        # Clean up
+        self.loop_stack.pop()
+        
+        return None
+
+    def visit_loop_checkif_statement(self, node):
+        """
+        Generate TAC for if statements in loops.
+        Similar to regular checkif but in a loop context.
+        """
+        # Generate labels for different parts of the control flow
+        else_label = self.get_label()
+        end_label = self.get_label()
+        
+        # Evaluate the condition
+        condition = self.visit(node.children[2])
+        
+        # Generate branch instruction - if condition is false, skip to else block
+        self.emit('IFFALSE', condition, None, else_label)
+        
+        # Visit the if block
+        self.visit(node.children[5])  # loop_block
+        
+        # After executing the if block, skip the else block
+        self.emit('GOTO', None, None, end_label)
+        
+        # Label for the else part (recheck or otherwise)
+        self.emit('LABEL', None, None, else_label)
+        
+        # Visit recheck and otherwise if present
+        for child in node.children[6:]:
+            if child and hasattr(child, 'data'):
+                if child.data == 'loop_recheck_statement':
+                    self.visit_loop_recheck_statement(child, end_label)
+                elif child.data == 'loop_otherwise_statement':
+                    self.visit_loop_otherwise_statement(child)
+        
+        # Label for the end of the if statement
+        self.emit('LABEL', None, None, end_label)
+        
+        return None
+
+    def visit_loop_recheck_statement(self, node, end_label):
+        """
+        Generate TAC for else-if statements in loops.
+        """
+        if not node or not hasattr(node, 'children') or len(node.children) < 5:
+            return None
+        
+        # Generate label for the next else-if part
+        next_else_label = self.get_label()
+        
+        # Evaluate the condition
+        condition = self.visit(node.children[2])
+        
+        # Generate branch instruction - if condition is false, skip to next else block
+        self.emit('IFFALSE', condition, None, next_else_label)
+        
+        # Visit the else-if block
+        self.visit(node.children[5])  # loop_block
+        
+        # After executing the else-if block, skip to the end
+        self.emit('GOTO', None, None, end_label)
+        
+        # Label for the next else part
+        self.emit('LABEL', None, None, next_else_label)
+        
+        # Visit next recheck statement if present
+        if len(node.children) > 7 and node.children[7]:
+            self.visit_loop_recheck_statement(node.children[7], end_label)
+        
+        return None
+
+    def visit_loop_otherwise_statement(self, node):
+        """
+        Generate TAC for else statements in loops.
+        """
+        if not node or not hasattr(node, 'children') or len(node.children) < 3:
+            return None
+        
+        # Visit the else block
+        self.visit(node.children[2])  # loop_block
+        
+        return None
+
+    def visit_switch_statement(self, node):
+        """
+        Generate TAC for switch statements.
+        Structure: SWITCH LPAREN expression RPAREN LBRACE CASE literals COLON program case_tail default RBRACE
+        """
+        # Generate label for the end of the switch statement
+        end_label = self.get_label()
+        
+        # Evaluate the switch expression
+        switch_expr = self.visit(node.children[2])
+        
+        # Generate code for the first case
+        case_value = self.visit(node.children[6])
+        
+        # Compare switch expression with case value
+        comp_temp = self.get_temp()
+        self.emit('EQ', switch_expr, case_value[1] if isinstance(case_value, tuple) else case_value, comp_temp)
+        
+        # Generate label for the next case
+        next_case_label = self.get_label()
+        
+        # If comparison is false, skip to next case
+        self.emit('IFFALSE', comp_temp, None, next_case_label)
+        
+        # Visit the case body
+        self.visit(node.children[8])
+        
+        # After executing a case, jump to the end
+        self.emit('GOTO', None, None, end_label)
+        
+        # Label for the next case
+        self.emit('LABEL', None, None, next_case_label)
+        
+        # Visit the case_tail (remaining cases)
+        if len(node.children) > 9 and node.children[9]:
+            self.visit_case_tail(node.children[9], switch_expr, end_label)
+        
+        # Visit default if present
+        if len(node.children) > 10 and node.children[10]:
+            self.visit(node.children[10])
+        
+        # Label for the end of the switch statement
+        self.emit('LABEL', None, None, end_label)
+        
+        return None
+
+    def visit_case_tail(self, node, switch_expr, end_label):
+        """
+        Generate TAC for additional cases in a switch statement.
+        """
+        if not node or not hasattr(node, 'children') or len(node.children) < 4:
+            return None
+        
+        # Get the case value
+        case_value = self.visit(node.children[1])
+        
+        # Compare switch expression with case value
+        comp_temp = self.get_temp()
+        self.emit('EQ', switch_expr, case_value[1] if isinstance(case_value, tuple) else case_value, comp_temp)
+        
+        # Generate label for the next case
+        next_case_label = self.get_label()
+        
+        # If comparison is false, skip to next case
+        self.emit('IFFALSE', comp_temp, None, next_case_label)
+        
+        # Visit the case body
+        self.visit(node.children[3])
+        
+        # After executing a case, jump to the end
+        self.emit('GOTO', None, None, end_label)
+        
+        # Label for the next case
+        self.emit('LABEL', None, None, next_case_label)
+        
+        # Visit the next case_tail if present
+        if len(node.children) > 4 and node.children[4]:
+            self.visit_case_tail(node.children[4], switch_expr, end_label)
+        
+        return None
+
+    def visit_func_checkif_statement(self, node):
+        """
+        Generate TAC for if statements in functions.
+        Similar to regular checkif but in a function context.
+        """
+        # Generate labels for different parts of the control flow
+        else_label = self.get_label()
+        end_label = self.get_label()
+        
+        # Evaluate the condition
+        condition = self.visit(node.children[2])
+        
+        # Generate branch instruction - if condition is false, skip to else block
+        self.emit('IFFALSE', condition, None, else_label)
+        
+        # Visit the if block
+        self.visit(node.children[5])  # function_prog
+        
+        # After executing the if block, skip the else block
+        self.emit('GOTO', None, None, end_label)
+        
+        # Label for the else part (recheck or otherwise)
+        self.emit('LABEL', None, None, else_label)
+        
+        # Visit recheck and otherwise if present
+        for child in node.children[6:]:
+            if child and hasattr(child, 'data'):
+                if child.data == 'func_recheck_statement':
+                    self.visit_func_recheck_statement(child, end_label)
+                elif child.data == 'func_otherwise_statement':
+                    self.visit_func_otherwise_statement(child)
+        
+        # Label for the end of the if statement
+        self.emit('LABEL', None, None, end_label)
+        
+        return None
+
+    def visit_func_recheck_statement(self, node, end_label):
+        """
+        Generate TAC for else-if statements in functions.
+        """
+        if not node or not hasattr(node, 'children') or len(node.children) < 5:
+            return None
+        
+        # Generate label for the next else-if part
+        next_else_label = self.get_label()
+        
+        # Evaluate the condition
+        condition = self.visit(node.children[2])
+        
+        # Generate branch instruction - if condition is false, skip to next else block
+        self.emit('IFFALSE', condition, None, next_else_label)
+        
+        # Visit the else-if block
+        self.visit(node.children[5])  # function_prog
+        
+        # After executing the else-if block, skip to the end
+        self.emit('GOTO', None, None, end_label)
+        
+        # Label for the next else part
+        self.emit('LABEL', None, None, next_else_label)
+        
+        # Visit next recheck statement if present
+        if len(node.children) > 7 and node.children[7]:
+            self.visit_func_recheck_statement(node.children[7], end_label)
+        
+        return None
+
+    def visit_func_otherwise_statement(self, node):
+        """
+        Generate TAC for else statements in functions.
+        """
+        if not node or not hasattr(node, 'children') or len(node.children) < 3:
+            return None
+        
+        # Visit the else block
+        self.visit(node.children[2])  # function_prog
+        
+        return None
+
+    def visit_func_loop_checkif_statement(self, node):
+        """
+        Generate TAC for if statements in function loops.
+        """
+        # Generate labels for different parts of the control flow
+        else_label = self.get_label()
+        end_label = self.get_label()
+        
+        # Evaluate the condition
+        condition = self.visit(node.children[2])
+        
+        # Generate branch instruction - if condition is false, skip to else block
+        self.emit('IFFALSE', condition, None, else_label)
+        
+        # Visit the if block
+        self.visit(node.children[5])  # func_loop_block
+        
+        # After executing the if block, skip the else block
+        self.emit('GOTO', None, None, end_label)
+        
+        # Label for the else part (recheck or otherwise)
+        self.emit('LABEL', None, None, else_label)
+        
+        # Visit recheck and otherwise if present
+        for child in node.children[6:]:
+            if child and hasattr(child, 'data'):
+                if child.data == 'func_loop_recheck_statement':
+                    self.visit_func_loop_recheck_statement(child, end_label)
+                elif child.data == 'func_loop_otherwise_statement':
+                    self.visit_func_loop_otherwise_statement(child)
+        
+        # Label for the end of the if statement
+        self.emit('LABEL', None, None, end_label)
+        
+        return None
+
+    def visit_func_loop_recheck_statement(self, node, end_label):
+        """
+        Generate TAC for else-if statements in function loops.
+        """
+        if not node or not hasattr(node, 'children') or len(node.children) < 5:
+            return None
+        
+        # Generate label for the next else-if part
+        next_else_label = self.get_label()
+        
+        # Evaluate the condition
+        condition = self.visit(node.children[2])
+        
+        # Generate branch instruction - if condition is false, skip to next else block
+        self.emit('IFFALSE', condition, None, next_else_label)
+        
+        # Visit the else-if block
+        self.visit(node.children[5])  # func_loop_block
+        
+        # After executing the else-if block, skip to the end
+        self.emit('GOTO', None, None, end_label)
+        
+        # Label for the next else part
+        self.emit('LABEL', None, None, next_else_label)
+        
+        # Visit next recheck statement if present
+        if len(node.children) > 7 and node.children[7]:
+            self.visit_func_loop_recheck_statement(node.children[7], end_label)
+        
+        return None
+
+    def visit_func_loop_otherwise_statement(self, node):
+        """
+        Generate TAC for else statements in function loops.
+        """
+        if not node or not hasattr(node, 'children') or len(node.children) < 3:
+            return None
+        
+        # Visit the else block
+        self.visit(node.children[2])  # func_loop_block
+        
         return None

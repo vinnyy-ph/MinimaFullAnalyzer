@@ -1,0 +1,14 @@
+var a = 62;
+var b = 8;
+
+var difference = a-b;
+
+show(difference);
+
+// TAC:
+
+0: ASSIGN 62 a
+1: ASSIGN 8 b
+2: SUB a b t1
+3: ASSIGN t1 difference
+4: PRINT difference

@@ -1,0 +1,15 @@
+var length = 10;
+var width = 2;
+var perimeter = 2*(length+width);
+
+
+show(perimeter);
+
+// TAC:
+
+0: ASSIGN 10 length
+1: ASSIGN 2 width
+2: ADD length width t1
+3: MUL 2 t1 t2
+4: ASSIGN t2 perimeter
+5: PRINT perimeter
