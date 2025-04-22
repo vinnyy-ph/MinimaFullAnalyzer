@@ -235,7 +235,7 @@ const CodeOutput = ({
                       Input Requested
                     </Typography>
                     <Typography variant="body2" sx={{ mb: 2 }}>
-                      {inputPrompt || "Enter value:"}
+                      {inputPrompt || ""}
                     </Typography>
                     <TextField
                       fullWidth

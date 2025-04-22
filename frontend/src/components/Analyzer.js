@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import CodeEditor from './Editor';
 import Buttons from './Buttons';
 import OutputTable from './OutputTable';
@@ -18,12 +18,7 @@ import {
   Paper,
   TextField,
   InputAdornment,
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogContentText,
-  DialogTitle
+  Button
 } from '@mui/material';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
@@ -47,13 +42,28 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
   const [inputPrompt, setInputPrompt] = useState('');
   const [executionId, setExecutionId] = useState(null);
   const [userInput, setUserInput] = useState('');
-  const [inputDialogOpen, setInputDialogOpen] = useState(false);
+  
+  // Terminal specific refs and states
+  const terminalRef = useRef(null);
+  const inputRef = useRef(null);
 
   const theme = useTheme();
 
   const handleTabChange = (event, newValue) => {
     setRightPanelTab(newValue);
   };
+
+  // Auto-scroll to bottom of terminal output when it changes
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+    }
+    
+    // Focus input field when waiting for input
+    if (waitingForInput && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [programOutput, waitingForInput]);
 
   const handleAnalyze = () => {
     setLoading(true);
@@ -101,6 +111,7 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     setWaitingForInput(false);
     setInputPrompt('');
     setExecutionId(null);
+    setUserInput('');
     
     // Switch to the Program Output tab when executing
     setRightPanelTab(1);
@@ -109,27 +120,18 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
       .then((response) => {
         const data = response.data;
         console.log("Execute response:", data);
-        console.log("Waiting for input?", data.waitingForInput);
-        console.log("Input prompt:", data.inputPrompt);
         
         if (data.success) {
           if (data.waitingForInput) {
             // Don't set any output message yet when waiting for input
-            setProgramOutput('');
+            setWaitingForInput(true);
+            setInputPrompt(data.inputPrompt);
+            setExecutionId(data.executionId);
           } else {
             setProgramOutput(data.output || 'Program executed successfully with no output.');
           }
           setTacCode(data.formattedTAC || '');
           setExecutionError('');
-          
-          // Check for waiting input
-          if (data.waitingForInput) {
-            console.log("Waiting for input with prompt:", data.inputPrompt);
-            setWaitingForInput(true);
-            setInputPrompt(data.inputPrompt);
-            setExecutionId(data.executionId);
-            setInputDialogOpen(true);  // Open the dialog when input is requested
-          }
         } else {
           setProgramOutput('');
           setTacCode(data.formattedTAC || '');
@@ -150,13 +152,13 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
       });
   };
  
-  // Add this function to handle input submission
-  const handleInputSubmit = (userInput) => {
+  // Handle input submission
+  const handleInputSubmit = () => {
     if (!executionId) return;
     
     setExecuting(true);
     
-    // Add the input to the program output
+    // Add the input to the program output with the prompt
     setProgramOutput((prev) => {
       if (prev && prev.trim()) {
         // Only add newline if there's existing content
@@ -197,7 +199,6 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
           setWaitingForInput(true);
           setInputPrompt(data.inputPrompt);
           setExecutionId(data.executionId);
-          setInputDialogOpen(true); // Open the dialog again if more input is needed
         } else {
           setWaitingForInput(false);
           setInputPrompt('');
@@ -225,16 +226,8 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
       setExecutionId(null);
       setExecuting(false);
     });
-  };
- 
-  const handleInputDialogSubmit = () => {
-    // Use the existing handleInputSubmit with the current userInput
-    handleInputSubmit(userInput);
     
-    // Close the dialog
-    setInputDialogOpen(false);
-    
-    // Clear the input field for next time
+    // Reset input field after submission
     setUserInput('');
   };
   
@@ -246,6 +239,10 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     setProgramOutput('');
     setTacCode('');
     setExecutionError('');
+    setWaitingForInput(false);
+    setInputPrompt('');
+    setExecutionId(null);
+    setUserInput('');
   };
 
   const handleLoadFile = (file) => {
@@ -318,6 +315,14 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
 
     return () => clearTimeout(delayDebounceFn);
   }, [code]); 
+
+  // Handle Enter key press in the input field
+  const handleKeyPress = (event) => {
+    if (event.key === 'Enter' && waitingForInput) {
+      handleInputSubmit();
+      event.preventDefault();
+    }
+  };
 
   return (
     <div style={{ padding: '20px' }}>
@@ -465,7 +470,9 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                       flexDirection: 'column',
                     }}
                   >
+                    {/* Terminal window container */}
                     <Box
+                      ref={terminalRef}
                       sx={{
                         padding: 2,
                         overflow: 'auto',
@@ -476,6 +483,9 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                         color: executionError ? '#ff5555' : theme.palette.text.primary,
                         whiteSpace: 'pre-wrap',
                         wordBreak: 'break-word',
+                        position: 'relative',
+                        display: 'flex',
+                        flexDirection: 'column',
                         '&::-webkit-scrollbar': { width: '10px' },
                         '&::-webkit-scrollbar-track': { 
                           background: theme.palette.mode === 'dark' ? '#2e2e2e' : '#eaeaea', 
@@ -489,7 +499,8 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                       }}
                     >
                       {executionError ? (
-                        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, p: 2 }}>
+                        // Display execution error if there is one
+                        <Box sx={{ p: 1, color: '#ff5555' }}>
                           <Typography
                             variant="subtitle1"
                             sx={{
@@ -504,72 +515,9 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                             {executionError}
                           </Box>
                         </Box>
-                      ) : waitingForInput ? (
-                        // Just show the input request without any other message
-                        <Box sx={{ p: 2 }}>
-                          <Typography
-                            variant="subtitle1"
-                            sx={{
-                              fontWeight: 'bold',
-                              mb: 1,
-                              color: theme.palette.mode === 'dark' ? '#4CAF50' : '#2E7D32',
-                            }}
-                          >
-                            Program Waiting for Input
-                          </Typography>
-                          {/* Input field section remains unchanged */}
-                          <Box 
-                            sx={{ 
-                              mt: 3, 
-                              p: 2, 
-                              backgroundColor: theme.palette.mode === 'dark' ? '#222' : '#e8e8e8',
-                              borderRadius: 1,
-                              border: `1px solid ${theme.palette.mode === 'dark' ? '#444' : '#ccc'}`,
-                            }}
-                          >
-                            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold' }}>
-                              Input Requested
-                            </Typography>
-                            <Typography variant="body2" sx={{ mb: 2 }}>
-                              {inputPrompt || "Enter value:"}
-                            </Typography>
-                            <TextField
-                              fullWidth
-                              variant="outlined"
-                              value={userInput}
-                              onChange={(e) => setUserInput(e.target.value)}
-                              onKeyPress={(event) => {
-                                if (event.key === 'Enter') {
-                                  handleInputSubmit(userInput);
-                                  setUserInput('');
-                                  event.preventDefault();
-                                }
-                              }}
-                              size="small"
-                              InputProps={{
-                                endAdornment: (
-                                  <InputAdornment position="end">
-                                    <Button 
-                                      variant="contained" 
-                                      color="primary"
-                                      size="small" 
-                                      onClick={() => {
-                                        handleInputSubmit(userInput);
-                                        setUserInput('');
-                                      }}
-                                      sx={{ ml: 1 }}
-                                    >
-                                      Submit
-                                    </Button>
-                                  </InputAdornment>
-                                ),
-                              }}
-                              autoFocus
-                            />
-                          </Box>
-                        </Box>
-                      ) : programOutput ? (
-                        <Box sx={{ p: 2 }}>
+                      ) : programOutput || waitingForInput ? (
+                        // Display program output container - terminal-like interface
+                        <Box sx={{ p: 1, flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
                           <Typography
                             variant="subtitle1"
                             sx={{
@@ -580,22 +528,105 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                           >
                             Program Output
                           </Typography>
+                          
+                          {/* Terminal output area */}
                           <Box
-                            component="pre"
                             sx={{
-                              margin: 0,
-                              padding: 2,
+                              flex: 1,
                               backgroundColor: theme.palette.mode === 'dark' ? '#111111' : '#f0f0f0',
                               borderRadius: 1,
                               border: `1px solid ${theme.palette.mode === 'dark' ? '#333' : '#ddd'}`,
-                              maxHeight: 'calc(100vh - 215px)',
-                              overflow: 'auto',
+                              padding: 2,
+                              overflowY: 'auto',
+                              minHeight: '60px',
+                              marginBottom: waitingForInput ? 1 : 0,
+                              fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
+                              fontSize: '0.9rem',
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                              '&::-webkit-scrollbar': { width: '8px' },
+                              '&::-webkit-scrollbar-track': { 
+                                background: theme.palette.mode === 'dark' ? '#2e2e2e' : '#eaeaea',
+                                borderRadius: '4px' 
+                              },
+                              '&::-webkit-scrollbar-thumb': {
+                                backgroundColor: theme.palette.mode === 'dark' ? '#555' : '#aaa',
+                                borderRadius: '10px',
+                                border: `2px solid ${theme.palette.mode === 'dark' ? '#2e2e2e' : '#eaeaea'}`,
+                              },
                             }}
                           >
                             {programOutput}
+                            {/* Input field will appear as a natural continuation */}
+                            {waitingForInput && (
+                              <Box component="span" sx={{ display: 'inline', color: theme.palette.mode === 'dark' ? '#4CAF50' : '#2E7D32' }}>
+                                {programOutput && !programOutput.endsWith('\n') ? '\n' : ''}
+                                {inputPrompt} 
+                              </Box>
+                            )}
                           </Box>
+                          
+                          {/* Input field for user input - only shows when waiting for input */}
+                          {waitingForInput && (
+                            <Box 
+                              sx={{ 
+                                display: 'flex',
+                                backgroundColor: theme.palette.mode === 'dark' ? '#111111' : '#f0f0f0',
+                                borderRadius: 1,
+                                border: `1px solid ${theme.palette.mode === 'dark' ? '#333' : '#ddd'}`,
+                                borderTop: 'none',
+                                borderTopLeftRadius: 0,
+                                borderTopRightRadius: 0,
+                              }}
+                            >
+                              <TextField
+                                fullWidth
+                                variant="outlined"
+                                value={userInput}
+                                onChange={(e) => setUserInput(e.target.value)}
+                                onKeyPress={handleKeyPress}
+                                inputRef={inputRef}
+                                size="small"
+                                autoFocus
+                                placeholder="Type here..."
+                                sx={{
+                                  '& .MuiOutlinedInput-root': {
+                                    '& fieldset': {
+                                      border: 'none',
+                                    },
+                                    '&:hover fieldset': {
+                                      border: 'none',
+                                    },
+                                    '&.Mui-focused fieldset': {
+                                      border: 'none',
+                                    },
+                                    fontSize: '0.9rem',
+                                    fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
+                                    backgroundColor: 'transparent',
+                                    padding: '4px 8px',
+                                  }
+                                }}
+                                InputProps={{
+                                  endAdornment: (
+                                    <InputAdornment position="end">
+                                      <Button 
+                                        variant="contained" 
+                                        color="primary"
+                                        size="small" 
+                                        onClick={handleInputSubmit}
+                                        sx={{ ml: 1 }}
+                                      >
+                                        Submit
+                                      </Button>
+                                    </InputAdornment>
+                                  ),
+                                }}
+                              />
+                            </Box>
+                          )}
                         </Box>
                       ) : (
+                        // Empty state - no program output yet
                         <Box
                           sx={{
                             display: 'flex',

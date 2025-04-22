@@ -669,7 +669,7 @@ class TACInterpreter:
             # Get the prompt (or use default)
             prompt = self.resolve_variable(arg1)
             if not prompt:
-                prompt = "Enter value:"  # Default prompt
+                prompt = ""  # Default prompt
             self.input_prompt = prompt
         
         elif op == 'CONCAT':

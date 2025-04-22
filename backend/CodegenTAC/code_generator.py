@@ -296,7 +296,7 @@ class TACGenerator(Visitor):
             elif isinstance(prompt_expr, str):
                 prompt_value = prompt_expr
             else:
-                prompt_value = "Enter value"
+                prompt_value = ""
                 
             # Emit INPUT instruction with the prompt
             self.emit('INPUT', prompt_value, None, temp)
@@ -389,7 +389,7 @@ class TACGenerator(Visitor):
     def visit_get_operand(self, node):
         """Visit a get_operand node (prompt inside get)."""
         if not node.children:
-            return ('text', "Enter value")
+            return ('text', "")
         
         return self.visit(node.children[0])
 
@@ -645,7 +645,7 @@ class TACGenerator(Visitor):
                 else:
                     prompt_value = prompt_expr
             else:
-                prompt_value = "Enter value"
+                prompt_value = ""
             
             # Create a temporary variable for the input result
             temp = self.get_temp()
@@ -670,7 +670,7 @@ class TACGenerator(Visitor):
             # Handle get() function specially
             if var_name == 'get':
                 # Get prompt (default if none provided)
-                prompt = "Enter value:"  # Default prompt
+                prompt = ""  # Default prompt
                 
                 # Extract prompt from arguments if available
                 if len(node.children[1].children) > 1:
