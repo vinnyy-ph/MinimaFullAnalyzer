@@ -51,13 +51,6 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
 
   const theme = useTheme();
 
-  // Add this effect to ensure the dialog opens when input is requested
-  useEffect(() => {
-    if (waitingForInput) {
-      setInputDialogOpen(true);
-    }
-  }, [waitingForInput]);
-
   const handleTabChange = (event, newValue) => {
     setRightPanelTab(newValue);
   };
@@ -120,7 +113,12 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
         console.log("Input prompt:", data.inputPrompt);
         
         if (data.success) {
-          setProgramOutput(data.output || 'Program executed successfully with no output.');
+          if (data.waitingForInput) {
+            // Don't set any output message yet when waiting for input
+            setProgramOutput('');
+          } else {
+            setProgramOutput(data.output || 'Program executed successfully with no output.');
+          }
           setTacCode(data.formattedTAC || '');
           setExecutionError('');
           
@@ -159,7 +157,15 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     setExecuting(true);
     
     // Add the input to the program output
-    setProgramOutput((prev) => `${prev}\n${inputPrompt} ${userInput}`);
+    setProgramOutput((prev) => {
+      if (prev && prev.trim()) {
+        // Only add newline if there's existing content
+        return `${prev}\n${inputPrompt} ${userInput}`;
+      } else {
+        // No newline for first input
+        return `${inputPrompt} ${userInput}`;
+      }
+    });
     
     console.log(`Submitting input: '${userInput}' for execution ${executionId}`);
     
@@ -498,6 +504,70 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                             {executionError}
                           </Box>
                         </Box>
+                      ) : waitingForInput ? (
+                        // Just show the input request without any other message
+                        <Box sx={{ p: 2 }}>
+                          <Typography
+                            variant="subtitle1"
+                            sx={{
+                              fontWeight: 'bold',
+                              mb: 1,
+                              color: theme.palette.mode === 'dark' ? '#4CAF50' : '#2E7D32',
+                            }}
+                          >
+                            Program Waiting for Input
+                          </Typography>
+                          {/* Input field section remains unchanged */}
+                          <Box 
+                            sx={{ 
+                              mt: 3, 
+                              p: 2, 
+                              backgroundColor: theme.palette.mode === 'dark' ? '#222' : '#e8e8e8',
+                              borderRadius: 1,
+                              border: `1px solid ${theme.palette.mode === 'dark' ? '#444' : '#ccc'}`,
+                            }}
+                          >
+                            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold' }}>
+                              Input Requested
+                            </Typography>
+                            <Typography variant="body2" sx={{ mb: 2 }}>
+                              {inputPrompt || "Enter value:"}
+                            </Typography>
+                            <TextField
+                              fullWidth
+                              variant="outlined"
+                              value={userInput}
+                              onChange={(e) => setUserInput(e.target.value)}
+                              onKeyPress={(event) => {
+                                if (event.key === 'Enter') {
+                                  handleInputSubmit(userInput);
+                                  setUserInput('');
+                                  event.preventDefault();
+                                }
+                              }}
+                              size="small"
+                              InputProps={{
+                                endAdornment: (
+                                  <InputAdornment position="end">
+                                    <Button 
+                                      variant="contained" 
+                                      color="primary"
+                                      size="small" 
+                                      onClick={() => {
+                                        handleInputSubmit(userInput);
+                                        setUserInput('');
+                                      }}
+                                      sx={{ ml: 1 }}
+                                    >
+                                      Submit
+                                    </Button>
+                                  </InputAdornment>
+                                ),
+                              }}
+                              autoFocus
+                            />
+                          </Box>
+                        </Box>
                       ) : programOutput ? (
                         <Box sx={{ p: 2 }}>
                           <Typography
@@ -524,111 +594,6 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                           >
                             {programOutput}
                           </Box>
-                          {/* Input field for get() operations */}
-                          {waitingForInput && (
-                            <Box 
-                              sx={{ 
-                                mt: 3, 
-                                p: 2, 
-                                backgroundColor: theme.palette.mode === 'dark' ? '#222' : '#e8e8e8',
-                                borderRadius: 1,
-                                border: `1px solid ${theme.palette.mode === 'dark' ? '#444' : '#ccc'}`,
-                              }}
-                            >
-                              <Typography 
-                                variant="subtitle2" 
-                                sx={{ 
-                                  mb: 1, 
-                                  fontWeight: 'bold',
-                                  color: theme.palette.mode === 'dark' ? '#4CAF50' : '#2E7D32',
-                                }}
-                              >
-                                Input Requested
-                              </Typography>
-                              <Typography variant="body2" sx={{ mb: 2 }}>
-                                {inputPrompt || "Enter value:"}
-                              </Typography>
-                              <TextField
-                                fullWidth
-                                variant="outlined"
-                                value={userInput}
-                                onChange={(e) => setUserInput(e.target.value)}
-                                onKeyPress={(event) => {
-                                  if (event.key === 'Enter') {
-                                    handleInputSubmit(userInput);
-                                    setUserInput('');
-                                    event.preventDefault();
-                                  }
-                                }}
-                                size="small"
-                                InputProps={{
-                                  endAdornment: (
-                                    <InputAdornment position="end">
-                                      <Button 
-                                        variant="contained" 
-                                        color="primary"
-                                        size="small" 
-                                        onClick={() => {
-                                          handleInputSubmit(userInput);
-                                          setUserInput('');
-                                        }}
-                                        sx={{ ml: 1 }}
-                                      >
-                                        Submit
-                                      </Button>
-                                    </InputAdornment>
-                                  ),
-                                }}
-                                autoFocus
-                              />
-                            </Box>
-                          )}
-                          {/* Input Dialog Modal */}
-                          <Dialog 
-                            open={inputDialogOpen} 
-                            onClose={() => {/* Do nothing to force the user to input */}}
-                            fullWidth
-                            maxWidth="sm"
-                            TransitionProps={{
-                              onEntered: () => {
-                                // Focus the input field when the dialog opens
-                                const inputField = document.querySelector('#user-input-field');
-                                if (inputField) inputField.focus();
-                              }
-                            }}
-                          >
-                            <DialogTitle sx={{ fontWeight: 'bold' }}>Input Required</DialogTitle>
-                            <DialogContent>
-                              <DialogContentText sx={{ mb: 2 }}>
-                                {inputPrompt || "Enter value:"}
-                              </DialogContentText>
-                              <TextField
-                                id="user-input-field"
-                                autoFocus
-                                margin="dense"
-                                fullWidth
-                                variant="outlined"
-                                value={userInput}
-                                onChange={(e) => setUserInput(e.target.value)}
-                                onKeyPress={(event) => {
-                                  if (event.key === 'Enter') {
-                                    handleInputDialogSubmit();
-                                    event.preventDefault();
-                                  }
-                                }}
-                                sx={{ mt: 1 }}
-                              />
-                            </DialogContent>
-                            <DialogActions>
-                              <Button 
-                                onClick={handleInputDialogSubmit}
-                                variant="contained" 
-                                color="primary"
-                              >
-                                Submit
-                              </Button>
-                            </DialogActions>
-                          </Dialog>
                         </Box>
                       ) : (
                         <Box
