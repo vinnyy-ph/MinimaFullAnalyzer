@@ -1,0 +1,15 @@
+func fibonacci(n){
+    checkif(n == 0){
+        throw 0;
+    } recheck(n==1) {
+        throw 1;
+    } otherwise {
+        throw fibonacci(n-1) + fibonacci(n-2);
+    }
+}
+
+var n = 13;
+
+each (var i = 0; i < n; i++) {
+    show(fibonacci(i));
+}

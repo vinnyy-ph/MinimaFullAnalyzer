@@ -51,6 +51,13 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
 
   const theme = useTheme();
 
+  // Add this effect to ensure the dialog opens when input is requested
+  useEffect(() => {
+    if (waitingForInput) {
+      setInputDialogOpen(true);
+    }
+  }, [waitingForInput]);
+
   const handleTabChange = (event, newValue) => {
     setRightPanelTab(newValue);
   };
@@ -108,7 +115,9 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     axios.post('http://localhost:5000/executeCode', { code })
       .then((response) => {
         const data = response.data;
-        console.log("Execute response:", data); // Debug log
+        console.log("Execute response:", data);
+        console.log("Waiting for input?", data.waitingForInput);
+        console.log("Input prompt:", data.inputPrompt);
         
         if (data.success) {
           setProgramOutput(data.output || 'Program executed successfully with no output.');

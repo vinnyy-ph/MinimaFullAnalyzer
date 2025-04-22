@@ -1,0 +1,33 @@
+func isPerfect(n) {
+  checkif (n <= 1) {
+    throw NO;
+  }
+  var sumOfDivisors = 1; # 1 is always a proper divisor
+
+  each (var i = 2; i * i <= n; i++) {
+    checkif (n % i == 0) {
+      sumOfDivisors += i;
+      checkif (i * i != n) { # Avoid adding the square root twice each perfect squares
+        sumOfDivisors += n / i;
+      }
+    }
+  }
+  throw sumOfDivisors == n;
+}
+
+func findPerfectNumbers(limit) {
+  var perfectNumbers = [0];
+  var count = 0; # Keep track of the next available index
+  show("Perfect numbers between 1 and " + limit + " are:");
+  each (var i = 1; i <= limit; i++) {
+    checkif (isPerfect(i)) {
+      perfectNumbers[count] = i; # Assign the perfect number to the current index
+      show(i);
+      count++; # Increment the index each the next perfect number
+    }
+  }
+  throw perfectNumbers;
+}
+
+# Find perfect numbers up to 100
+findPerfectNumbers(100);

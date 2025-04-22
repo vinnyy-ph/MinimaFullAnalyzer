@@ -41,7 +41,8 @@ class SemanticAnalyzer(Visitor):
         self.has_return = False
         self.function_returns = {}  # Maps function names to their return values
         self.function_throw_expressions = {}  # Maps function names to their thrown expression nodes
-
+        self.loop_stack = []  
+        
     def push_scope(self):
         self.current_scope = SymbolTable(parent=self.current_scope)
 
@@ -310,6 +311,8 @@ class SemanticAnalyzer(Visitor):
 
     # Helper to convert a value (with its type) to a numeric value for arithmetic.
     def to_numeric(self, typ, value, target="int"):
+        if typ == "unknown":
+            return 0  # Return a default numeric value for unknown types
         if typ == "state":
             return (float(convert_state_to_point(value)) if target == "point" 
                     else convert_state_to_int(value))
@@ -327,25 +330,48 @@ class SemanticAnalyzer(Visitor):
         Returns a tuple (result_type, result_value)
         Enhanced to track get operations.
         """
-        has_gets = []
-        if left[0] == "get":
-            has_gets.append(left[1])
-        if right[0] == "get":
-            has_gets.append(right[1])
+        # ENHANCED: Skip detailed type checking if either operand comes from get() or is unknown
+        # This check needs to be comprehensive and at the very beginning
+        if (left[0] == "unknown" or right[0] == "unknown" or
+            left[0] == "get" or right[0] == "get" or
+            left[0] == "parameter" or right[0] == "parameter"):
+            # For comparison operators, return a default state result
+            if op in ["==", "!=", "<", ">", "<=", ">="]:
+                return ("state", "NO")  # Default placeholder value for semantic analysis
+            # For arithmetic, infer a reasonable type
+            elif op in ["+", "-", "*", "/", "%"]:
+                # If either operand is text (even if one is get/unknown), result is text for +
+                if op == "+" and (left[0] == "text" or right[0] == "text"):
+                    return ("text", "") # Default empty text
+                # Default to number types for other arithmetic
+                elif op == "/":
+                    return ("point", 0.0) # Default point
+                else: # +, -, *, % default to integer
+                    return ("integer", 0) # Default integer
+            # For other operations, be conservative
+            else:
+                return ("unknown", None)
 
-        if has_gets:
-            return ("compound_get", has_gets)
+        # # Existing code for has_gets
+        # has_gets = []
+        # if left[0] == "get":
+        #     has_gets.append(left[1])
+        # if right[0] == "get":
+        #     has_gets.append(right[1])
 
-        # NEW CODE: Handle operations involving parameters
+        # if has_gets:
+        #     return ("compound_get", has_gets)
+
+        # Parameter type inference for operations
         if left[0] == "parameter" or right[0] == "parameter":
             if op in ["+", "-", "*", "/", "%"]:  # Arithmetic operations
                 # For arithmetic operations, infer the result type
                 if op == "/" or left[0] == "point" or right[0] == "point":
-                    return ("point", None)  # Division or point operand results in point
+                    return ("point", 0.0)  # Use a default value instead of None
                 else:
-                    return ("integer", None)  # Default to integer for other arithmetic ops
+                    return ("integer", 0)  # Use a default value instead of None
             elif op in ["==", "!=", "<", ">", "<=", ">="]:  # Comparison operations
-                return ("state", None)  # Comparisons produce a state (boolean)
+                return ("state", "NO")  # Use a default value
             else:
                 # For other operations, be conservative
                 return ("unknown", None)
@@ -421,8 +447,18 @@ class SemanticAnalyzer(Visitor):
             elif op == "*":
                 result = L * R
             elif op == "/":
+                # Add division by zero check for concrete values
+                if R == 0 or R == 0.0:
+                     self.errors.append(SemanticError(
+                         "Division by zero", line, column))
+                     return ("unknown", None)
                 result = L / R
             elif op == "%":
+                 # Add division by zero check for concrete values
+                if R == 0:
+                     self.errors.append(SemanticError(
+                         "Modulo by zero", line, column))
+                     return ("unknown", None)
                 result = L % R
             else:
                 self.errors.append(SemanticError(
@@ -547,31 +583,43 @@ class SemanticAnalyzer(Visitor):
             left = self.get_value(children[0])
             op = children[1].value  # "==" or "!="
             right = self.get_value(children[2])
-            
-            # Special handling for empty values in equality comparisons
-            if left[0] == "empty" or right[0] == "empty":
+
+            # UPDATED: Better check for get() results - ensure using both [0] == "get" and startswith("g")
+            if (left[0] == "unknown" or right[0] == "unknown" or 
+                left[0] == "get" or right[0] == "get" or 
+                left[0] == "parameter" or right[0] == "parameter" or
+                str(left[0]).startswith("g") or str(right[0]).startswith("g")):
+                result = ("state", "NO")  # Default placeholder value
+            elif left[0] == "empty" or right[0] == "empty":
                 # Two empty values are equal to each other
                 if op == "==":
-                    result = (left[0] == "empty" and right[0] == "empty")
+                    comparison_result = (left[0] == "empty" and right[0] == "empty")
                 else:  # op == "!="
-                    result = (left[0] != "empty" or right[0] != "empty")
-                result = ("state", "YES" if result else "NO")
+                    comparison_result = (left[0] != "empty" or right[0] != "empty")
+                result = ("state", "YES" if comparison_result else "NO")
             else:
+                # Only perform comparison if neither is from get()
                 try:
                     if op == "==":
-                        result = left[1] == right[1]
-                    else:
-                        result = (left[1] != right[1])
-                    result = ("state", "YES" if result else "NO")
+                        comparison_result = left[1] == right[1]
+                    else: # op == "!="
+                        comparison_result = (left[1] != right[1])
+                    result = ("state", "YES" if comparison_result else "NO")
+                except TypeError as e:
+                    line = children[1].line if hasattr(children[1], 'line') else 0
+                    column = children[1].column if hasattr(children[1], 'column') else 0
+                    self.errors.append(TypeMismatchError(
+                        left[0], right[0], f"equality comparison ('{op}')", line, column))
+                    result = ("unknown", None)
                 except Exception as e:
                     line = children[1].line if hasattr(children[1], 'line') else 0
                     column = children[1].column if hasattr(children[1], 'column') else 0
                     self.errors.append(SemanticError(
                         f"Error in equality comparison: {str(e)}", line, column))
                     result = ("unknown", None)
-        
-        self.values[id(node)] = result
-        return result
+    
+            self.values[id(node)] = result
+            return result
 
     def visit_relational_expr(self, node):
         children = node.children
@@ -581,18 +629,33 @@ class SemanticAnalyzer(Visitor):
             left = self.get_value(children[0])
             op = children[1].value
             right = self.get_value(children[2])
-            
+
             # Get line and column for error reporting
             line = children[1].line if hasattr(children[1], "line") else 0
             column = children[1].column if hasattr(children[1], "column") else 0
-    
-            # If either operand's value is None, report the error once and return.
-            if left[1] is None or right[1] is None:
-                self.errors.append(SemanticError(
-                    f"Operator '{op}' not supported between '{left[0]}' and '{right[0]}'",
-                    line, column))
-                result = ("unknown", None)
+
+            # Add this debug code before the type checking
+            print(f"DEBUG: left type={left[0]}, right type={right[0]}")
+            
+            # If there's an error, add further debugging
+            if left[0] != "get" and right[0] != "get" and (str(left[0]).startswith("g") or str(right[0]).startswith("g")):
+                print(f"DEBUG: Found partial 'get' match: {left[0]}, {right[0]}")
+
+            # UPDATED: Better check for get() results using multiple approaches
+            if (left[0] == "unknown" or right[0] == "unknown" or 
+                left[0] == "get" or right[0] == "get" or 
+                left[0] == "parameter" or right[0] == "parameter" or
+                str(left[0]).startswith("g") or str(right[0]).startswith("g")):
+                result = ("state", "NO")  # Default placeholder value for semantic analysis
+            elif left[1] is None or right[1] is None:
+                # Check if types are 'empty' before reporting error
+                if left[0] != "empty" and right[0] != "empty":
+                    self.errors.append(SemanticError(
+                        f"Operator '{op}' not supported between '{left[0]}' and '{right[0]}'",
+                        line, column))
+                result = ("unknown", None) # Comparison with empty is generally not well-defined
             else:
+                # Only perform comparison if both types are known and not get/unknown/parameter
                 try:
                     if op == "<":
                         comparison = left[1] < right[1]
@@ -603,15 +666,20 @@ class SemanticAnalyzer(Visitor):
                     elif op == ">=":
                         comparison = left[1] >= right[1]
                     else:
+                        self.errors.append(SemanticError(f"Unsupported relational operator '{op}'", line, column))
                         comparison = False
                     result = ("state", "YES" if comparison else "NO")
+                except TypeError as e:
+                    self.errors.append(TypeMismatchError(
+                        left[0], right[0], f"relational comparison ('{op}')", line, column))
+                    result = ("unknown", None)
                 except Exception as e:
                     self.errors.append(SemanticError(
                         f"Error in comparison: {str(e)}", line, column))
                     result = ("unknown", None)
-        
-        self.values[id(node)] = result
-        return result
+    
+            self.values[id(node)] = result
+            return result
 
     def visit_add_expr(self, node):
         children = node.children
@@ -756,12 +824,16 @@ class SemanticAnalyzer(Visitor):
                 
                 # Handle initialization based on expression type
                 if isinstance(expr_value, tuple) and len(expr_value) >= 1:
-                    if expr_value[0] == "get":
-                        # Single get operation
-                        prompt = expr_value[1]
-                        self.current_scope.variables[name].value = self.handle_get_declaration(name, prompt)
+                    if isinstance(expr_value, tuple) and len(expr_value) >= 1 and expr_value[0] == "get":
+                        # Ensure we store it properly with exactly the "get" type string
+                        self.current_scope.variables[name].value = ("get", expr_value[1])
+                        # Print message for get operations
+                        prompt_text = str(expr_value[1])
+                        if self.current_function:
+                            print(f"Declared variable {name} with get input and prompt \"{prompt_text}\" inside function {self.current_function}")
+                        else:
+                            print(f"Declared global variable {name} with get input and prompt \"{prompt_text}\"")
                     elif expr_value[0] == "compound_get":
-                        # Multiple get operations in an expression
                         prompts = expr_value[1]
                         prompt_texts = []
                         for p in prompts:
@@ -829,12 +901,16 @@ class SemanticAnalyzer(Visitor):
                 
                 # Check if this is a single get operation or compound get operation
                 if isinstance(expr_value, tuple) and len(expr_value) >= 1:
-                    if expr_value[0] == "get":
-                        # Single get operation
-                        prompt = expr_value[1]
-                        self.current_scope.variables[name].value = self.handle_get_declaration(name, prompt)
+                    if isinstance(expr_value, tuple) and len(expr_value) >= 1 and expr_value[0] == "get":
+                        # Ensure we store it properly with exactly the "get" type string
+                        self.current_scope.variables[name].value = ("get", expr_value[1])
+                        # Print message for get operations
+                        prompt_text = str(expr_value[1])
+                        if self.current_function:
+                            print(f"Declared variable {name} with get input and prompt \"{prompt_text}\" inside function {self.current_function}")
+                        else:
+                            print(f"Declared global variable {name} with get input and prompt \"{prompt_text}\"")
                     elif expr_value[0] == "compound_get":
-                        # Multiple get operations in an expression
                         prompts = expr_value[1]
                         prompt_texts = []
                         for p in prompts:
@@ -900,12 +976,16 @@ class SemanticAnalyzer(Visitor):
                 
                 # Check if this is a get operation (single or compound)
                 if isinstance(expr_value, tuple) and len(expr_value) >= 1:
-                    if expr_value[0] == "get":
-                        # Single get operation
-                        prompt = expr_value[1]
-                        self.current_scope.variables[name].value = self.handle_get_declaration(name, prompt)
+                    if isinstance(expr_value, tuple) and len(expr_value) >= 1 and expr_value[0] == "get":
+                        # Ensure we store it properly with exactly the "get" type string
+                        self.current_scope.variables[name].value = ("get", expr_value[1])
+                        # Print message for get operations
+                        prompt_text = str(expr_value[1])
+                        if self.current_function:
+                            print(f"Declared fixed variable {name} with get input and prompt \"{prompt_text}\" inside function {self.current_function}")
+                        else:
+                            print(f"Declared global fixed variable {name} with get input and prompt \"{prompt_text}\"")
                     elif expr_value[0] == "compound_get":
-                        # Multiple get operations in an expression
                         prompts = expr_value[1]
                         prompt_texts = []
                         for p in prompts:
@@ -970,12 +1050,16 @@ class SemanticAnalyzer(Visitor):
                 
                 # Check if this is a get operation (single or compound)
                 if isinstance(expr_value, tuple) and len(expr_value) >= 1:
-                    if expr_value[0] == "get":
-                        # Single get operation
-                        prompt = expr_value[1]
-                        self.current_scope.variables[name].value = self.handle_get_declaration(name, prompt)
+                    if isinstance(expr_value, tuple) and len(expr_value) >= 1 and expr_value[0] == "get":
+                        # Ensure we store it properly with exactly the "get" type string
+                        self.current_scope.variables[name].value = ("get", expr_value[1])
+                        # Print message for get operations
+                        prompt_text = str(expr_value[1])
+                        if self.current_function:
+                            print(f"Declared fixed variable {name} with get input and prompt \"{prompt_text}\" inside function {self.current_function}")
+                        else:
+                            print(f"Declared global fixed variable {name} with get input and prompt \"{prompt_text}\"")
                     elif expr_value[0] == "compound_get":
-                        # Multiple get operations in an expression
                         prompts = expr_value[1]
                         prompt_texts = []
                         for p in prompts:
@@ -1602,8 +1686,8 @@ class SemanticAnalyzer(Visitor):
         else:
             print(f"Declared global variable {name} with get input and prompt \"{prompt_text}\"")
         
-        # Return a placeholder value since we can't know the actual input
-        return ("unknown", None)
+        # Ensure we consistently return a "get" type, not "unknown"
+        return ("get", prompt_text)
 
     def enter_loop(self):
         """Enter a loop context."""
@@ -1627,102 +1711,77 @@ class SemanticAnalyzer(Visitor):
     def check_boolean_expr(self, expr_node, context):
         """
         Check if an expression node can be evaluated as a boolean (state).
-        Used for conditional statements.
+        Used for conditional statements. Allows 'get' and 'unknown' types.
         """
         expr_value = self.get_value(expr_node)
-        if not expr_value or expr_value[0] == "unknown":
-            return  # Skip further checks if expression could not be evaluated
-            
-        if expr_value[0] != "state" and expr_value[0] != "integer" and expr_value[0] != "point" and expr_value[0] != "text":
+        if not expr_value:
+            # If expression evaluation failed completely, can't check type
+            return
+
+        # Explicitly allow get, unknown, and parameter types in boolean contexts
+        allowed_types = ["state", "integer", "point", "text", "get", "unknown", "parameter"]
+        if expr_value[0] not in allowed_types:
             # Get line and column from the first token in the expression if possible
             line, column = 0, 0
-            if hasattr(expr_node, 'children') and expr_node.children:
-                first_child = expr_node.children[0]
-                if hasattr(first_child, 'line'):
-                    line = first_child.line
-                    column = first_child.column
-                    
+            token_node = expr_node
+            while hasattr(token_node, 'children') and token_node.children:
+                token_node = token_node.children[0]
+
+            if hasattr(token_node, 'line'):
+                line = token_node.line
+                column = token_node.column
+
             self.errors.append(TypeMismatchError(
-                "state, integer, point, or text", expr_value[0], context, line, column))
+                "state, integer, point, text, or user input", expr_value[0], context, line, column))
             
     def visit_each_statement(self, node):
         """
-        Generate TAC for each loops (for loops).
-        Structure: EACH LPAREN each_initialization expression SEMICOLON (expression | var_assign) RPAREN LBRACE loop_block RBRACE
+        Semantic analysis for each_statement (for loop).
+        Syntax: EACH LPAREN each_initialization expression SEMICOLON (expression | var_assign) RPAREN LBRACE loop_block RBRACE
         """
-        # Generate labels for loop control
-        start_label = self.get_label()
-        cond_label = self.get_label()
-        end_label = self.get_label()
+        # Visit and validate the initialization
+        self.visit(node.children[2])
         
-        # Remember these labels for nested control flow statements (exit, next)
-        self.loop_stack.append((cond_label, end_label))
+        # Visit and validate the condition
+        condition_expr = node.children[3]
+        self.check_boolean_expr(condition_expr, "each loop condition")
+        self.visit(condition_expr)
         
-        # Initialization
-        self.visit(node.children[2])  # each_initialization
+        # Visit and validate the increment
+        self.visit(node.children[5])
         
-        # Jump to condition check
-        self.emit('GOTO', None, None, cond_label)
+        # Push scope and enter loop for the body
+        self.push_scope()
+        self.enter_loop()
         
-        # Label for loop start
-        self.emit('LABEL', None, None, start_label)
-        
-        # Visit loop body
+        # Visit the loop body
         self.visit(node.children[7])  # loop_block
         
-        # Update expression
-        self.visit(node.children[5])  # update expression
-        
-        # Condition check label
-        self.emit('LABEL', None, None, cond_label)
-        
-        # Evaluate condition
-        condition = self.visit(node.children[3])
-        
-        # If condition is true, jump to start
-        self.emit('IFTRUE', condition, None, start_label)
-        
-        # End label
-        self.emit('LABEL', None, None, end_label)
-        
-        # Remove this loop from the stack
-        self.loop_stack.pop()
-        
+        # Exit loop and pop scope
+        self.exit_loop()
+        self.pop_scope()
         return None
 
     def visit_repeat_statement(self, node):
         """
-        Generate TAC for repeat loops (while loops).
-        Structure: REPEAT LPAREN expression RPAREN LBRACE loop_block RBRACE
+        Semantic analysis for repeat_statement (while loop).
+        Syntax: REPEAT LPAREN expression RPAREN LBRACE loop_block RBRACE
         """
-        # Generate labels for start and end
-        start_label = self.get_label()
-        end_label = self.get_label()
+        # Visit and validate the condition
+        condition_expr = node.children[2]
+        self.check_boolean_expr(condition_expr, "repeat loop condition")
+        self.visit(condition_expr)
         
-        # Save labels for control flow statements
-        self.loop_stack.append((start_label, end_label))
+        # Push scope and enter loop for the body
+        self.push_scope()
+        self.enter_loop()
         
-        # Start label
-        self.emit('LABEL', None, None, start_label)
-        
-        # Evaluate condition
-        condition = self.visit(node.children[2])
-        
-        # If condition is false, exit loop
-        self.emit('IFFALSE', condition, None, end_label)
-        
-        # Visit loop body
+        # Visit the loop body
         self.visit(node.children[4])  # loop_block
         
-        # Jump back to start after body
-        self.emit('GOTO', None, None, start_label)
-        
-        # End label
-        self.emit('LABEL', None, None, end_label)
-        
-        # Pop this loop from stack
-        self.loop_stack.pop()
-        
+        # Exit loop and pop scope
+        self.exit_loop()
+        self.pop_scope()
         return None
 
     def visit_do_repeat_statement(self, node):

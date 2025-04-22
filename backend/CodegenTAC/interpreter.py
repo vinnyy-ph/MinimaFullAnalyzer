@@ -23,6 +23,13 @@ class TACInterpreter:
         self.steps_executed = 0
         self.max_execution_steps = 1000  # Default limit
 
+    def set_execution_limit(self, limit=None):
+        """
+        Set the maximum execution steps limit.
+        Use None to disable the limit entirely.
+        """
+        self.max_execution_steps = limit
+
     def resolve_variable(self, val):
         """Helper to resolve a variable to its value, handling parameter names properly."""
         if val is None:
@@ -38,17 +45,47 @@ class TACInterpreter:
             
         # For string literals (already resolved)
         if isinstance(val, str) and (val.startswith('"') and val.endswith('"')):
-            return val[1:-1]  # Remove quotes
+            # Remove quotes
+            inner_str = val[1:-1]
+            
+            # Process escape sequences properly
+            result = ""
+            i = 0
+            while i < len(inner_str):
+                if inner_str[i] == '\\' and i + 1 < len(inner_str):
+                    next_char = inner_str[i+1]
+                    if next_char == '\\':
+                        result += '\\'
+                    elif next_char == '"':
+                        result += '"'
+                    elif next_char == 'n':
+                        result += '\n'
+                    elif next_char == 't':
+                        result += '\t'
+                    else:
+                        result += '\\' + next_char
+                    i += 2
+                else:
+                    result += inner_str[i]
+                    i += 1
+            
+            return result
+        
+        # Special handling for temporary variables not found in memory
+        if isinstance(val, str) and val.startswith('t') and val[1:].isdigit():
+            if self.debug_mode:
+                print(f"Warning: Temporary variable {val} not found in memory, using False")
+            return False  # Return False for missing temps to prevent infinite loops
         
         # Try numeric conversion for string literals
         if isinstance(val, str):
             try:
-                if '.' in val:
-                    return float(val)
-                else:
-                    return int(val)
+                return int(val) 
             except ValueError:
-                pass
+                try:
+                    return float(val)
+                except ValueError:
+                    pass
         
         # Return the original value if no resolution needed
         return val
@@ -134,8 +171,8 @@ class TACInterpreter:
         self.steps_executed = 0  # Reset step counter
         
         while 0 <= self.ip < len(self.instructions):
-            # Check for execution step limit to prevent infinite loops
-            if self.steps_executed >= self.max_execution_steps:
+            # Only check limit if it's not None
+            if self.max_execution_steps is not None and self.steps_executed >= self.max_execution_steps:
                 print(f"Execution terminated after {self.steps_executed} steps to prevent infinite loop.")
                 break
             
@@ -370,12 +407,19 @@ class TACInterpreter:
             right_is_string = isinstance(right_val, str) and not (right_val.isdigit() or (right_val[0] == '-' and right_val[1:].isdigit()))
             
             if left_is_string or right_is_string:
-                # String concatenation
-                str_left = "" if left_val is None else str(left_val)
-                str_right = "" if right_val is None else str(right_val)
+                # String concatenation with special handling for booleans
+                if isinstance(left_val, bool):
+                    str_left = "YES" if left_val else "NO"
+                else:
+                    str_left = "" if left_val is None else str(left_val)
+                    
+                if isinstance(right_val, bool):
+                    str_right = "YES" if right_val else "NO"
+                else:
+                    str_right = "" if right_val is None else str(right_val)
+                    
                 self.memory[result] = str_left + str_right
             else:
-                # Numeric addition
                 try:
                     # Convert to appropriate numeric types
                     left_num = float(left_val) if isinstance(left_val, float) or (isinstance(left_val, str) and '.' in left_val) else int(left_val)
@@ -588,18 +632,34 @@ class TACInterpreter:
                         # Convert boolean to YES/NO in lists
                         if isinstance(value, bool):
                             value = "YES" if value else "NO"
+                        # Format negative numbers with tilde
+                        elif isinstance(value, (int, float)) and value < 0:
+                            value = f"~{abs(value)}"
                         formatted_list.append(value)
                     else:
                         # Convert boolean to YES/NO in lists
                         if isinstance(item, bool):
                             item = "YES" if item else "NO"
+                        # Format negative numbers with tilde
+                        elif isinstance(item, (int, float)) and item < 0:
+                            item = f"~{abs(item)}"
                         formatted_list.append(item)
-                self.output_buffer.write(str(formatted_list) + "\n")
+                self.output_buffer.write(str(formatted_list))  # Removed newline
             else:
                 # Convert boolean to YES/NO for direct values
                 if isinstance(val, bool):
                     val = "YES" if val else "NO"
-                self.output_buffer.write(str(val) + "\n")
+                # Format negative numbers with tilde
+                elif isinstance(val, (int, float)) and val < 0:
+                    val = f"~{abs(val)}"
+                # Handle escape sequences in strings
+                if isinstance(val, str):
+                    # Process escape sequences manually instead of relying on unicode_escape
+                    val = val.replace('\\\\', '\\')  # First handle double backslashes
+                    val = val.replace('\\"', '"')    # Then handle escaped quotes
+                    val = val.replace('\\n', '\n')   # Then handle newlines
+                    val = val.replace('\\t', '\t')   # Then handle tabs
+                self.output_buffer.write(str(val))  # Removed newline
 
         elif op == 'INPUT':
             # Set the input state and pause execution
@@ -609,16 +669,40 @@ class TACInterpreter:
             # Get the prompt (or use default)
             prompt = self.resolve_variable(arg1)
             if not prompt:
-                prompt = "Enter value"
+                prompt = "Enter value:"  # Default prompt
             self.input_prompt = prompt
-
+        
         elif op == 'CONCAT':
             val1 = self.resolve_variable(arg1)
             val2 = self.resolve_variable(arg2)
             
-            # Convert to strings and concatenate
-            str_val1 = "" if val1 is None else str(val1)
-            str_val2 = "" if val2 is None else str(val2)
+            # Convert to strings with special handling for booleans and negative numbers
+            if isinstance(val1, bool):
+                str_val1 = "YES" if val1 else "NO"
+            elif isinstance(val1, (int, float)) and val1 < 0:
+                str_val1 = f"~{abs(val1)}"
+            else:
+                str_val1 = "" if val1 is None else str(val1)
+                
+            if isinstance(val2, bool):
+                str_val2 = "YES" if val2 else "NO"
+            elif isinstance(val2, (int, float)) and val2 < 0:
+                str_val2 = f"~{abs(val2)}"
+            else:
+                str_val2 = "" if val2 is None else str(val2)
+            # Process escape sequences if they exist in the string literals
+            for i, str_val in enumerate([str_val1, str_val2]):
+                if isinstance(str_val, str):
+                    # Process escape sequences in consistent order
+                    processed = str_val.replace('\\\\', '\\')  # First handle double backslashes
+                    processed = processed.replace('\\"', '"')   # Then handle escaped quotes
+                    processed = processed.replace('\\n', '\n')  # Then handle newlines
+                    processed = processed.replace('\\t', '\t')  # Then handle tabs
+                    
+                    if i == 0:
+                        str_val1 = processed
+                    else:
+                        str_val2 = processed
             
             self.memory[result] = str_val1 + str_val2
 
@@ -673,10 +757,22 @@ class TACInterpreter:
             index_raw = self.resolve_variable(arg2)
             
             # Extract the actual index value
-            if isinstance(index_raw, tuple) and len(index_raw) >= 2 and index_raw[0] == 'integer':
-                index = index_raw[1]
+            if isinstance(index_raw, tuple) and len(index_raw) >= 2:
+                if index_raw[0] == 'integer':
+                    index = index_raw[1]
+                elif index_raw[0] == 'id':
+                    # Handle variable reference tuple - look up the variable value
+                    var_name = index_raw[1]
+                    if var_name in self.memory:
+                        index = self.memory[var_name]
+                    else:
+                        raise ValueError(f"Variable '{var_name}' not found for list indexing")
+                else:
+                    # Other tuple types
+                    index = index_raw[1]  # Get the value part from the tuple
             else:
                 try:
+                    # Direct value or already resolved variable
                     index = int(index_raw)
                 except (ValueError, TypeError):
                     raise ValueError(f"Invalid list index: {index_raw}")

@@ -113,7 +113,7 @@ def execute_code(code, execution_id=None, user_input=None):
         interpreter = TACInterpreter().load(tac_instructions)
         
         # Configure execution limits and debug mode
-        max_steps = 1000
+        max_steps = float('inf')
         interpreter.max_execution_steps = max_steps
         
         # Optional: Enable debug mode for troubleshooting 

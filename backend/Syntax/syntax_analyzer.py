@@ -5,7 +5,7 @@ from lark import Lark, UnexpectedToken, UnexpectedCharacters, UnexpectedInput, U
 from .syntax_errors import process_syntax_error
 from .token_map import TOKEN_MAP
 
-grammar_path = os.path.join(os.path.dirname(__file__), "grammar_semantic.lark")
+grammar_path = os.path.join(os.path.dirname(__file__), "grammar.lark")
 parser = Lark.open(grammar_path, start="start", parser="lalr")
 
 def analyze_syntax(code):

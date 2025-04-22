@@ -1,0 +1,139 @@
+func is_perfect(n){
+    var divisors_sum = 0;
+
+    checkif (n % 1 == 0 && 1 != n) { divisors_sum += 1; }
+    checkif (n % 2 == 0 && 2 != n) { divisors_sum += 2; }
+    checkif (n % 3 == 0 && 3 != n) { divisors_sum += 3; }
+    checkif (n % 4 == 0 && 4 != n) { divisors_sum += 4; }
+    checkif (n % 5 == 0 && 5 != n) { divisors_sum += 5; }
+    checkif (n % 6 == 0 && 6 != n) { divisors_sum += 6; }
+    checkif (n % 7 == 0 && 7 != n) { divisors_sum += 7; }
+    checkif (n % 8 == 0 && 8 != n) { divisors_sum += 8; }
+    checkif (n % 9 == 0 && 9 != n) { divisors_sum += 9; }
+    checkif (n % 10 == 0 && 10 != n) { divisors_sum += 10; }
+    checkif (n % 11 == 0 && 11 != n) { divisors_sum += 11; }
+    checkif (n % 12 == 0 && 12 != n) { divisors_sum += 12; }
+    checkif (n % 13 == 0 && 13 != n) { divisors_sum += 13; }
+    checkif (n % 14 == 0 && 14 != n) { divisors_sum += 14; }
+    checkif (n % 15 == 0 && 15 != n) { divisors_sum += 15; }
+    checkif (n % 16 == 0 && 16 != n) { divisors_sum += 16; }
+    checkif (n % 17 == 0 && 17 != n) { divisors_sum += 17; }
+    checkif (n % 18 == 0 && 18 != n) { divisors_sum += 18; }
+    checkif (n % 19 == 0 && 19 != n) { divisors_sum += 19; }
+    checkif (n % 20 == 0 && 20 != n) { divisors_sum += 20; }
+    checkif (n % 21 == 0 && 21 != n) { divisors_sum += 21; }
+    checkif (n % 22 == 0 && 22 != n) { divisors_sum += 22; }
+    checkif (n % 23 == 0 && 23 != n) { divisors_sum += 23; }
+    checkif (n % 24 == 0 && 24 != n) { divisors_sum += 24; }
+    checkif (n % 25 == 0 && 25 != n) { divisors_sum += 25; }
+    checkif (n % 26 == 0 && 26 != n) { divisors_sum += 26; }
+    checkif (n % 27 == 0 && 27 != n) { divisors_sum += 27; }
+    checkif (n % 28 == 0 && 28 != n) { divisors_sum += 28; }
+    checkif (n % 29 == 0 && 29 != n) { divisors_sum += 29; }
+    checkif (n % 30 == 0 && 30 != n) { divisors_sum += 30; }
+
+    throw (divisors_sum == n);
+}
+
+show("Perfect numbers between 1 and 100 are: ");
+
+checkif (is_perfect(1)) { show(1); }
+checkif (is_perfect(2)) { show(2); }
+checkif (is_perfect(3)) { show(3); }
+checkif (is_perfect(4)) { show(4); }
+checkif (is_perfect(5)) { show(5); }
+checkif (is_perfect(6)) { show(6); }
+checkif (is_perfect(7)) { show(7); }
+checkif (is_perfect(8)) { show(8); }
+checkif (is_perfect(9)) { show(9); }
+checkif (is_perfect(10)) { show(10); }
+checkif (is_perfect(11)) { show(11); }
+checkif (is_perfect(12)) { show(12); }
+checkif (is_perfect(13)) { show(13); }
+checkif (is_perfect(14)) { show(14); }
+checkif (is_perfect(15)) { show(15); }
+checkif (is_perfect(16)) { show(16); }
+checkif (is_perfect(17)) { show(17); }
+checkif (is_perfect(18)) { show(18); }
+checkif (is_perfect(19)) { show(19); }
+checkif (is_perfect(20)) { show(20); }
+checkif (is_perfect(21)) { show(21); }
+checkif (is_perfect(22)) { show(22); }
+checkif (is_perfect(23)) { show(23); }
+checkif (is_perfect(24)) { show(24); }
+checkif (is_perfect(25)) { show(25); }
+checkif (is_perfect(26)) { show(26); }
+checkif (is_perfect(27)) { show(27); }
+checkif (is_perfect(28)) { show(28); }
+checkif (is_perfect(29)) { show(29); }
+checkif (is_perfect(30)) { show(30); }
+checkif (is_perfect(31)) { show(31); }
+checkif (is_perfect(32)) { show(32); }
+checkif (is_perfect(33)) { show(33); }
+checkif (is_perfect(34)) { show(34); }
+checkif (is_perfect(35)) { show(35); }
+checkif (is_perfect(36)) { show(36); }
+checkif (is_perfect(37)) { show(37); }
+checkif (is_perfect(38)) { show(38); }
+checkif (is_perfect(39)) { show(39); }
+checkif (is_perfect(40)) { show(40); }
+checkif (is_perfect(41)) { show(41); }
+checkif (is_perfect(42)) { show(42); }
+checkif (is_perfect(43)) { show(43); }
+checkif (is_perfect(44)) { show(44); }
+checkif (is_perfect(45)) { show(45); }
+checkif (is_perfect(46)) { show(46); }
+checkif (is_perfect(47)) { show(47); }
+checkif (is_perfect(48)) { show(48); }
+checkif (is_perfect(49)) { show(49); }
+checkif (is_perfect(50)) { show(50); }
+checkif (is_perfect(51)) { show(51); }
+checkif (is_perfect(52)) { show(52); }
+checkif (is_perfect(53)) { show(53); }
+checkif (is_perfect(54)) { show(54); }
+checkif (is_perfect(55)) { show(55); }
+checkif (is_perfect(56)) { show(56); }
+checkif (is_perfect(57)) { show(57); }
+checkif (is_perfect(58)) { show(58); }
+checkif (is_perfect(59)) { show(59); }
+checkif (is_perfect(60)) { show(60); }
+checkif (is_perfect(61)) { show(61); }
+checkif (is_perfect(62)) { show(62); }
+checkif (is_perfect(63)) { show(63); }
+checkif (is_perfect(64)) { show(64); }
+checkif (is_perfect(65)) { show(65); }
+checkif (is_perfect(66)) { show(66); }
+checkif (is_perfect(67)) { show(67); }
+checkif (is_perfect(68)) { show(68); }
+checkif (is_perfect(69)) { show(69); }
+checkif (is_perfect(70)) { show(70); }
+checkif (is_perfect(71)) { show(71); }
+checkif (is_perfect(72)) { show(72); }
+checkif (is_perfect(73)) { show(73); }
+checkif (is_perfect(74)) { show(74); }
+checkif (is_perfect(75)) { show(75); }
+checkif (is_perfect(76)) { show(76); }
+checkif (is_perfect(77)) { show(77); }
+checkif (is_perfect(78)) { show(78); }
+checkif (is_perfect(79)) { show(79); }
+checkif (is_perfect(80)) { show(80); }
+checkif (is_perfect(81)) { show(81); }
+checkif (is_perfect(82)) { show(82); }
+checkif (is_perfect(83)) { show(83); }
+checkif (is_perfect(84)) { show(84); }
+checkif (is_perfect(85)) { show(85); }
+checkif (is_perfect(86)) { show(86); }
+checkif (is_perfect(87)) { show(87); }
+checkif (is_perfect(88)) { show(88); }
+checkif (is_perfect(89)) { show(89); }
+checkif (is_perfect(90)) { show(90); }
+checkif (is_perfect(91)) { show(91); }
+checkif (is_perfect(92)) { show(92); }
+checkif (is_perfect(93)) { show(93); }
+checkif (is_perfect(94)) { show(94); }
+checkif (is_perfect(95)) { show(95); }
+checkif (is_perfect(96)) { show(96); }
+checkif (is_perfect(97)) { show(97); }
+checkif (is_perfect(98)) { show(98); }
+checkif (is_perfect(99)) { show(99); }
+checkif (is_perfect(100)) { show(100); }
