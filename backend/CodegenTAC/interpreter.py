@@ -752,7 +752,7 @@ class TACInterpreter:
                 self.memory[arg1] = [item]
 
         elif op == 'LIST_ACCESS':
-            # Access an element in a list
+            # Access an element in a list or character in a string
             list_var = self.resolve_variable(arg1)
             index_raw = self.resolve_variable(arg2)
             
@@ -766,7 +766,7 @@ class TACInterpreter:
                     if var_name in self.memory:
                         index = self.memory[var_name]
                     else:
-                        raise ValueError(f"Variable '{var_name}' not found for list indexing")
+                        raise ValueError(f"Variable '{var_name}' not found for indexing")
                 else:
                     # Other tuple types
                     index = index_raw[1]  # Get the value part from the tuple
@@ -775,10 +775,11 @@ class TACInterpreter:
                     # Direct value or already resolved variable
                     index = int(index_raw)
                 except (ValueError, TypeError):
-                    raise ValueError(f"Invalid list index: {index_raw}")
+                    raise ValueError(f"Invalid index: {index_raw}")
             
-            # Fixed logic for list access
+            # Handle both list and string indexing
             if isinstance(list_var, list):
+                # List indexing
                 if isinstance(index, int) and 0 <= index < len(list_var):
                     # Extract the actual element value
                     element = list_var[index]
@@ -788,8 +789,15 @@ class TACInterpreter:
                         self.memory[result] = element
                 else:
                     raise ValueError(f"Invalid index {index} for list {arg1}")
+            elif isinstance(list_var, str):
+                # String indexing
+                if isinstance(index, int) and 0 <= index < len(list_var):
+                    # Extract the character at the given index
+                    self.memory[result] = list_var[index]
+                else:
+                    raise ValueError(f"Invalid index {index} for string {arg1}")
             else:
-                raise ValueError(f"Cannot index non-list: {arg1}")
+                raise ValueError(f"Cannot index non-list/non-string: {arg1}")
 
         elif op == 'GROUP_ACCESS':
             # Access an element in a group (dictionary)

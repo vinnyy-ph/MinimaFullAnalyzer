@@ -878,9 +878,10 @@ class TACGenerator(Visitor):
         # Create a temporary variable for the result
         temp = self.get_temp()
         
-        # Generate appropriate access instruction
+        # Generate appropriate access instruction - we'll use LIST_ACCESS for both lists and strings
+        # The interpreter will handle the distinction between list and string indexing
         if is_list_access:
-            # Handle list indexing
+            # Handle list indexing or string indexing (interpreter will determine the type)
             self.emit('LIST_ACCESS', var_name, index_expr, temp)
         else:
             # Handle group access (similar to dictionary)
