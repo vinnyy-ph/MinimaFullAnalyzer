@@ -328,26 +328,30 @@ class SemanticAnalyzer(Visitor):
         Evaluate a binary arithmetic expression.
         left and right are tuples: (type, value)
         Returns a tuple (result_type, result_value)
-        Enhanced to track get operations.
+        Enhanced to track get operations and be more permissive with user input.
         """
-        # ENHANCED: Skip detailed type checking if either operand comes from get() or is unknown
+        # ENHANCED: Skip detailed type checking if either operand might involve user input
         # This check needs to be comprehensive and at the very beginning
         if (left[0] == "unknown" or right[0] == "unknown" or
             left[0] == "get" or right[0] == "get" or
-            left[0] == "parameter" or right[0] == "parameter"):
+            left[0] == "parameter" or right[0] == "parameter" or
+            str(left[0]).startswith("g") or str(right[0]).startswith("g")):
+            
             # For comparison operators, return a default state result
             if op in ["==", "!=", "<", ">", "<=", ">="]:
                 return ("state", "NO")  # Default placeholder value for semantic analysis
+            
             # For arithmetic, infer a reasonable type
             elif op in ["+", "-", "*", "/", "%"]:
                 # If either operand is text (even if one is get/unknown), result is text for +
                 if op == "+" and (left[0] == "text" or right[0] == "text"):
-                    return ("text", "") # Default empty text
+                    return ("text", "")  # Default empty text
                 # Default to number types for other arithmetic
                 elif op == "/":
-                    return ("point", 0.0) # Default point
-                else: # +, -, *, % default to integer
-                    return ("integer", 0) # Default integer
+                    return ("point", 0.0)  # Default point
+                else:  # +, -, *, % default to integer
+                    return ("integer", 0)  # Default integer
+            
             # For other operations, be conservative
             else:
                 return ("unknown", None)
@@ -583,12 +587,13 @@ class SemanticAnalyzer(Visitor):
             left = self.get_value(children[0])
             op = children[1].value  # "==" or "!="
             right = self.get_value(children[2])
-
-            # UPDATED: Better check for get() results - ensure using both [0] == "get" and startswith("g")
+    
+            # UPDATED: More comprehensive check for get() results and user input
             if (left[0] == "unknown" or right[0] == "unknown" or 
                 left[0] == "get" or right[0] == "get" or 
                 left[0] == "parameter" or right[0] == "parameter" or
-                str(left[0]).startswith("g") or str(right[0]).startswith("g")):
+                str(left[0]).startswith("g") or str(right[0]).startswith("g") or
+                left[1] is None or right[1] is None):  # Also be permissive with None values
                 result = ("state", "NO")  # Default placeholder value
             elif left[0] == "empty" or right[0] == "empty":
                 # Two empty values are equal to each other
@@ -633,6 +638,15 @@ class SemanticAnalyzer(Visitor):
             # Get line and column for error reporting
             line = children[1].line if hasattr(children[1], "line") else 0
             column = children[1].column if hasattr(children[1], "column") else 0
+
+            # ENHANCED: More permissive check for get() operations and user input
+            # Include any possibility where user input might be involved
+            if (left[0] == "unknown" or right[0] == "unknown" or 
+                left[0] == "get" or right[0] == "get" or 
+                left[0] == "parameter" or right[0] == "parameter" or
+                str(left[0]).startswith("g") or str(right[0]).startswith("g") or
+                left[1] is None or right[1] is None):
+                result = ("state", "NO")  # Default placeholder for semantic analysis
 
             # Add this debug code before the type checking
             print(f"DEBUG: left type={left[0]}, right type={right[0]}")
@@ -747,12 +761,20 @@ class SemanticAnalyzer(Visitor):
         line = target_token.line
         column = target_token.column
         inner = self.get_value(children[2])
-        # Only use the first two elements of inner
+        target = target_token.value.lower()  # "integer", "point", "state", "text"
+        
+        # First extract the current type and value BEFORE using them
         if isinstance(inner, tuple) and len(inner) >= 2:
             current_type, current_value = inner[0], inner[1]
         else:
             current_type, current_value = "unknown", None
-        target = target_token.value.lower()  # "integer", "point", "state", "text"
+        
+        # Now we can use current_type in conditions
+        if current_type == "get" or str(current_type).startswith("g"):
+            result = (target, None)  # Just assume the typecast will work at runtime
+            self.values[id(node)] = result
+            return result
+        
         try:
             if target == "integer":
                 if current_type == "point":
@@ -1711,16 +1733,19 @@ class SemanticAnalyzer(Visitor):
     def check_boolean_expr(self, expr_node, context):
         """
         Check if an expression node can be evaluated as a boolean (state).
-        Used for conditional statements. Allows 'get' and 'unknown' types.
+        Used for conditional statements. Allow user input in conditions.
         """
         expr_value = self.get_value(expr_node)
         if not expr_value:
             # If expression evaluation failed completely, can't check type
             return
-
-        # Explicitly allow get, unknown, and parameter types in boolean contexts
+    
+        # ENHANCED: Explicitly allow get, unknown, and parameter types in boolean contexts
+        # Any type that might involve user input should be permitted in conditions
         allowed_types = ["state", "integer", "point", "text", "get", "unknown", "parameter"]
-        if expr_value[0] not in allowed_types:
+        
+        # Also check for string representations that might indicate get() operations
+        if expr_value[0] not in allowed_types and not str(expr_value[0]).startswith("g"):
             # Get line and column from the first token in the expression if possible
             line, column = 0, 0
             token_node = expr_node
