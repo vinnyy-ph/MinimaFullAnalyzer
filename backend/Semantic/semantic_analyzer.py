@@ -260,6 +260,11 @@ class SemanticAnalyzer(Visitor):
             
         var_type = var_value[0]
         
+        # IMPORTANT: Skip list access check for parameters or get() results
+        # This is the main fix - don't validate list access for parameters
+        if var_type == "parameter" or var_type == "get" or var_type == "unknown":
+            return
+            
         # Check for list access on this node or its children
         for child in node.children:
             if (hasattr(child, "data") and child.data == "group_or_list" and 

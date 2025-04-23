@@ -1,0 +1,28 @@
+# Read a single letter (as text)
+var letter = text(get("Enter a single letter: "));
+
+# Check if the input is a single letter
+checkif (letter != empty && letter[1] == empty ) {
+
+    # Check if it's a valid alphabetic character (both lowercase and uppercase)
+    checkif (
+        (letter >= "a" && letter <= "z") || (letter >= "A" && letter <= "Z")
+    ) {
+
+        # Check if it's a vowel (both lowercase and uppercase)
+        checkif (
+            letter == "a" || letter == "e" || letter == "i" || letter == "o" || letter == "u" ||
+            letter == "A" || letter == "E" || letter == "I" || letter == "O" || letter == "U"
+        ) {
+            show(letter + " is a vowel");
+        } otherwise {
+            show(letter + " is a consonant");
+        }
+
+    } otherwise {
+        show(letter + " is not a valid letter");
+    }
+
+} otherwise {
+    show("Input is not a single letter");
+}

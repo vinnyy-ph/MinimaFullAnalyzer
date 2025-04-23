@@ -99,7 +99,7 @@ assign_op: ASSIGN | ADD_ASSIGN | SUB_ASSIGN | MUL_ASSIGN | DIV_ASSIGN
 
 get_expr: GET LPAREN (expression)? RPAREN
 
-list_literal: LSQB list_value RSQB
+list_literal: LSQB list_value? RSQB
 list_value: expression COMMA (expression (COMMA expression)*)?
 
 id_usage: IDENTIFIER id_usage_tail?

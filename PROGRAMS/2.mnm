@@ -1,0 +1,14 @@
+func sumDigits(number) {
+    var sum = 0;
+    repeat (number > 0) {
+        var digit = integer(number) % 10;
+        sum += digit;
+        number = number / 10;
+    }
+    throw sum;
+}
+
+
+var num = integer(get("Enter a number: "));
+var result = sumDigits(num);
+show("The sum of digits is: " + text(result));

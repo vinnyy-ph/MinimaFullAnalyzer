@@ -1,0 +1,24 @@
+func is_prime(num) {
+    checkif (num <= 1) {
+        throw NO;
+    }
+
+    var i = 2;
+    repeat (i <= num / 2) {
+        checkif ((num % i) == 0) {
+            throw NO;
+        }
+        i = i + 1;
+    }
+
+    throw YES;
+}
+
+var n = integer(get("Enter a number: "));
+var check = is_prime(n);
+
+checkif (check == YES) {
+    show(text(n) + " is a prime number.");
+} otherwise {
+    show(text(n) + " is not a prime number.");
+}

@@ -1,0 +1,19 @@
+var i;
+var originalText =  get("Enter a word: ");
+var reversedText = "";
+var length = 10;
+
+
+
+
+each(i = length - 1; i >= 0; i--){
+    reversedText = reversedText + originalText[i];
+}
+
+
+checkif(originalText == reversedText){
+    show(originalText + " is a palindrome");
+} otherwise {
+    show(originalText + " is not a palindrome");
+}
+

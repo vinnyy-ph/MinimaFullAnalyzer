@@ -22,6 +22,48 @@ class TACInterpreter:
         # Add step counting
         self.steps_executed = 0
         self.max_execution_steps = 1000  # Default limit
+        
+        self.max_digits = 9
+        self.min_number = -999999999
+        self.max_number = 999999999
+
+    def validate_number(self, value):
+        """Validate that a number is within the allowed range."""
+        # Skip validation for non-numeric values
+        if value is None or not isinstance(value, (int, float)):
+            return value
+            
+        # Convert to integer if it's a whole number
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+            
+        # Check range for integers
+        if isinstance(value, int):
+            if value < self.min_number or value > self.max_number:
+                raise ValueError(f"Number out of range: {value}. Valid range is {self.min_number} to {self.max_number}")
+        
+        # Check digit limits for floats
+        elif isinstance(value, float):
+            # Convert to string to check digits
+            str_val = str(abs(value))
+            parts = str_val.split('.')
+            
+            # Check integer part (left of decimal)
+            integer_part = parts[0]
+            if len(integer_part) > self.max_digits:
+                raise ValueError(f"Number has too many digits in integer part: {value}. Maximum {self.max_digits} digits allowed")
+            
+            # Check fractional part (right of decimal) if present
+            if len(parts) > 1:
+                fractional_part = parts[1]
+                if len(fractional_part) > self.max_digits:
+                    raise ValueError(f"Number has too many digits in fractional part: {value}. Maximum {self.max_digits} digits allowed")
+            
+            # Also check absolute magnitude isn't too large
+            if abs(value) > float(self.max_number) + 0.999999999:
+                raise ValueError(f"Float value out of range: {value}. Valid range is ~{self.min_number}.999999999 to {self.max_number}.999999999")
+                    
+        return value
 
     def set_execution_limit(self, limit=None):
         """
@@ -235,18 +277,34 @@ class TACInterpreter:
         return self.output_buffer.getvalue()
     
     def resume_with_input(self, user_input):
-        """Resume execution after receiving user input"""
+        """Resume execution after receiving user input with number validation."""
         if not self.waiting_for_input:
             raise ValueError("Interpreter is not waiting for input")
         
-        # Store the input in the specified variable
-        self.memory[self.input_result_var] = user_input
+        # Try to convert input to number if possible
+        try:
+            # Check if it's an integer
+            input_val = int(user_input)
+            # Validate the number
+            input_val = self.validate_number(input_val)
+        except ValueError:
+            try:
+                # Try float if integer conversion failed
+                input_val = float(user_input)
+                # Validate the number
+                input_val = self.validate_number(input_val)
+            except ValueError:
+                # If not a valid number, keep as string
+                input_val = user_input
+        
+        # Store the validated input
+        self.memory[self.input_result_var] = input_val
         
         # Reset input-waiting state
         self.waiting_for_input = False
         self.input_prompt = ""
         
-        # Resume execution from the next instruction
+        # Continue execution from next instruction
         self.ip += 1
         
         # Continue running until completion or next input request
@@ -480,8 +538,12 @@ class TACInterpreter:
                     # Convert to appropriate numeric types
                     left_num = float(left_val) if isinstance(left_val, float) or (isinstance(left_val, str) and '.' in left_val) else int(left_val)
                     right_num = float(right_val) if isinstance(right_val, float) or (isinstance(right_val, str) and '.' in right_val) else int(right_val)
-                    self.memory[result] = left_num + right_num
-                except (ValueError, TypeError):
+                    computed_result = left_num + right_num
+                    # Validate number before storing
+                    self.memory[result] = self.validate_number(computed_result)
+                except ValueError as e:
+                    if "out of range" in str(e) or "too many digits" in str(e):
+                        raise e
                     # Fallback to string concatenation if conversion fails
                     self.memory[result] = str(left_val) + str(right_val)
 
@@ -493,8 +555,12 @@ class TACInterpreter:
                 # Convert to appropriate numeric types
                 left_num = float(left_val) if isinstance(left_val, float) or (isinstance(left_val, str) and '.' in left_val) else int(left_val)
                 right_num = float(right_val) if isinstance(right_val, float) or (isinstance(right_val, str) and '.' in right_val) else int(right_val)
-                self.memory[result] = left_num - right_num
-            except (ValueError, TypeError):
+                computed_result = left_num - right_num
+                # Validate number before storing
+                self.memory[result] = self.validate_number(computed_result)
+            except ValueError as e:
+                if "out of range" in str(e) or "too many digits" in str(e):
+                    raise e
                 raise ValueError(f"Cannot subtract values: {left_val} - {right_val}")
 
         elif op == 'MUL':
@@ -784,16 +850,24 @@ class TACInterpreter:
                     self.memory[result] = 1 if val else 0
                 else:
                     try:
-                        self.memory[result] = int(val)
-                    except (ValueError, TypeError):
+                        computed_result = int(val)
+                        # Validate number before storing
+                        self.memory[result] = self.validate_number(computed_result)
+                    except (ValueError, TypeError) as e:
+                        if "out of range" in str(e) or "too many digits" in str(e):
+                            raise e
                         self.memory[result] = 0  # Default if conversion fails
             elif arg2 == 'point':
                 if isinstance(val, bool):
                     self.memory[result] = 1.0 if val else 0.0
                 else:
                     try:
-                        self.memory[result] = float(val)
-                    except (ValueError, TypeError):
+                        computed_result = float(val)
+                        # Validate number before storing
+                        self.memory[result] = self.validate_number(computed_result)
+                    except (ValueError, TypeError) as e:
+                        if "out of range" in str(e) or "too many digits" in str(e):
+                            raise e
                         self.memory[result] = 0.0  # Default if conversion fails
             elif arg2 == 'text':
                 self.memory[result] = str(val)

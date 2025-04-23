@@ -1,0 +1,23 @@
+
+
+var n = integer(get("Enter a positive number: "));
+
+
+
+
+var rev = 0;
+
+
+
+
+repeat (n > 0) {
+    var digit = n % 10;                  
+    rev = rev * 10 + digit;          
+    n = integer(n / 10);          
+}
+
+
+
+
+show("Reversed number: " + text(rev));
+
