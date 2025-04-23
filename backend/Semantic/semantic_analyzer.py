@@ -1134,7 +1134,6 @@ class SemanticAnalyzer(Visitor):
             self.visit(children[4])
         return
 
-
     def visit_var_assign(self, node):
         """
         Enhanced var_assign with support for list and group element reassignment.
@@ -1200,7 +1199,11 @@ class SemanticAnalyzer(Visitor):
             if var_value:
                 var_type = var_value[0] if isinstance(var_value, tuple) else None
                 
-                if var_type not in ["integer", "point", "text"]:
+                # MODIFIED: Allow += on lists
+                if op == "+=" and var_type == "list":
+                    # += is valid for lists (concatenation)
+                    pass
+                elif var_type not in ["integer", "point", "text"]:
                     self.errors.append(SemanticError(
                         f"Operator '{op}' not applicable to variable of type '{var_type}'", 
                         assign_op_node.children[0].line if hasattr(assign_op_node, 'children') else 0,
@@ -1215,29 +1218,46 @@ class SemanticAnalyzer(Visitor):
         if not has_accessor:
             # Simple variable assignment
             if op == "=":
-                scope.variables[name].value =expr_value
+                scope.variables[name].value = expr_value
             else:
                 # Handle compound assignments (+=, -=, etc.)
                 var_value = getattr(symbol, "value", None)
                 if var_value:
-                    # Compute the new value based on the operator
+                    # Get line and column for error reporting
                     assign_token = assign_op_node.children[0] if hasattr(assign_op_node, "children") and assign_op_node.children else assign_op_node
-                    line_info = assign_token.line
-                    column_info = assign_token.column
-                    if op == "+=":
-                        new_value = self.evaluate_binary("+", var_value, expr_value, line_info, column_info)
-                    elif op == "-=":
-                        new_value = self.evaluate_binary("-", var_value, expr_value, line_info, column_info)
-                    elif op == "*=":
-                        new_value = self.evaluate_binary("*", var_value, expr_value, line_info, column_info)
-                    elif op == "/=":
-                        new_value = self.evaluate_binary("/", var_value, expr_value, line_info, column_info)
+                    line_info = getattr(assign_token, 'line', 0)
+                    column_info = getattr(assign_token, 'column', 0)
+                    
+                    # MODIFIED: Special handling for list += list
+                    if op == "+=" and var_value[0] == "list":
+                        if expr_value[0] == "list":
+                            # In-place list concatenation
+                            var_list = var_value[1]
+                            expr_list = expr_value[1]
+                            var_list.extend(expr_list)
+                            scope.variables[name].value = ("list", var_list)
+                            print(f"List {name} extended in-place with {len(expr_list)} elements")
+                        else:
+                            # Error: can only concatenate list with list
+                            self.errors.append(SemanticError(
+                                f"Can only concatenate list to list (not '{expr_value[0]}')", 
+                                line_info, column_info))
                     else:
-                        new_value = expr_value  # Fallback
-                        
-                    scope.variables[name].value =new_value
-                
-            print(f"Variable {name} reassigned to expression value {expr_value[1]} and type {expr_value[0]}")
+                        # Regular compound assignment
+                        if op == "+=":
+                            new_value = self.evaluate_binary("+", var_value, expr_value, line_info, column_info)
+                        elif op == "-=":
+                            new_value = self.evaluate_binary("-", var_value, expr_value, line_info, column_info)
+                        elif op == "*=":
+                            new_value = self.evaluate_binary("*", var_value, expr_value, line_info, column_info)
+                        elif op == "/=":
+                            new_value = self.evaluate_binary("/", var_value, expr_value, line_info, column_info)
+                        else:
+                            new_value = expr_value  # Fallback
+                            
+                        scope.variables[name].value = new_value
+                    
+                print(f"Variable {name} reassigned to expression value {expr_value[1]} and type {expr_value[0]}")
         else:
             # List/group element assignment
             var_value = getattr(symbol, "value", None)
@@ -1497,13 +1517,14 @@ class SemanticAnalyzer(Visitor):
         """
         Handles function definitions with syntax:
         func identifier(param1, param2) { function_prog }
+        Only registers function and parameters but DOES NOT analyze function body.
         """
         # children: [FUNC, IDENTIFIER, LPAREN, param_node, RPAREN, LBRACE, function_prog, RBRACE, (optional SEMICOLON)]
         func_token = node.children[1]
         func_name = func_token.value
         line = func_token.line
         column = func_token.column
-
+    
         # Extract parameters from the param node (node.children[3])
         params = []
         params_node = node.children[3]
@@ -1520,55 +1541,36 @@ class SemanticAnalyzer(Visitor):
             # Single parameter case (params_node is likely a Token)
             if hasattr(params_node, "type") and params_node.type == "IDENTIFIER":
                 params.append(params_node.value)
-
+    
         # Define the function in the global scope; report error if redefined.
         if not self.global_scope.define_function(func_name, params=params, line=line, column=column):
             self.errors.append(FunctionRedefinedError(func_name, line, column))
             return
-
+    
         # Print tracking message for function definition
         print(f'Function "{func_name}" defined with parameters {params}')
-
-        # Save the current function context and enter a new scope for the function body (local scope)
-        old_function = self.current_function
-        old_has_return = self.has_return
+    
+        # MODIFICATION: Default return value for function (assume empty return)
+        # We won't analyze the function body, so just set a default return value
+        self.function_returns[func_name] = ("empty", None)
+        print(f"Function '{func_name}' assumed to throw value empty (body not analyzed)")
         
-        self.current_function = func_name
-        self.has_return = False  # Reset return tracking for this function
-        self.push_scope()
-
-        # Define each parameter as a local variable in the new scope WITH PARAMETER TYPE
-        # This is the key change - mark parameters as a special type
-        for param in params:
-            self.current_scope.define_variable(param, fixed=False)
-            self.current_scope.variables[param].value = ("parameter", None)  # Mark as parameter type
-
-        # Visit the function body; the body is in the "function_prog" child (index 6)
-        self.visit(node.children[6])
+        # Store the function body for later (actual execution) but don't analyze it
+        function_body = node.children[6]
+        # We could store this if needed for runtime execution, but we don't analyze it
         
-        # AFTER visiting, check if a return value was set
-        if not self.has_return and func_name not in self.function_returns:
-            self.function_returns[func_name] = ("empty", None)
-            print(f"Function '{func_name}' throws value empty")
-
-        # Exit the function's local scope and restore the previous function context.
-        self.pop_scope()
-        self.current_function = old_function
-        self.has_return = old_has_return
-
     def visit_function_prog(self, node):
         """
         Visits the function body (a block of statements inside the function).
-        This is similar to the global program but runs in the function's local scope.
+        MODIFIED: No semantic checking is performed on function bodies.
         """
-        for child in node.children:
-            self.visit(child)
+        # Skip semantic checking of function bodies
+        return None
 
     def visit_throw_statement(self, node):
         """
         Processes a throw statement - needs to be in a function.
-        Syntax: THROW expression SEMICOLON
-        Stores the expression for later evaluation when the function is called.
+        MODIFIED: Just register that function has a throw but don't analyze the expression
         """
         if not self.current_function:
             throw_token = node.children[0]
@@ -1578,25 +1580,16 @@ class SemanticAnalyzer(Visitor):
                 "throw", "functions", line, column))
             return None
         
-        # Get expression being thrown
-        expr_node = node.children[1]
-        
-        # Get the value of the expression
-        result = self.get_value(expr_node)
-        
-        # Store the expression node for later evaluation during function calls
-        self.function_throw_expressions[self.current_function] = expr_node
-        
-        # Also store the evaluated result for direct lookup
-        self.function_returns[self.current_function] = result
+        # Just mark the function as having a return value without analyzing expression
+        self.function_returns[self.current_function] = ("unknown", None)
         
         # Set that this function has a return value
         self.has_return = True
         
-        print(f"Function '{self.current_function}' throws an expression/value")
+        print(f"Function '{self.current_function}' throws an expression (not analyzed)")
         
         return None
-
+    
     def evaluate_function_args(self, func_call_node):
         """
         Evaluates the arguments in a function call.
@@ -2174,51 +2167,15 @@ class SemanticAnalyzer(Visitor):
         
     # Visit each loop in functions
     def visit_each_func_statement(self, node):
-        # Similar to visit_each_statement but in a function context
-        self.visit(node.children[2])
-        condition_expr = node.children[3]
-        self.check_boolean_expr(condition_expr, "each loop condition")
-        self.visit(condition_expr)
-        self.visit(node.children[5])
-        
-        self.push_scope()
-        self.enter_loop()
-        self.visit(node.children[7])  # func_loop_block
-        self.exit_loop()
-        self.pop_scope()
         return None
         
     def visit_repeat_func_statement(self, node):
-        # Similar to visit_repeat_statement but in a function context
-        condition_expr = node.children[2]
-        self.check_boolean_expr(condition_expr, "repeat loop condition")
-        self.visit(condition_expr)
-        
-        self.push_scope()
-        self.enter_loop()
-        self.visit(node.children[4])  # func_loop_block
-        self.exit_loop()
-        self.pop_scope()
         return None
         
     def visit_do_repeat_func_statement(self, node):
-        # Similar to visit_do_repeat_statement but in a function context
-        self.push_scope()
-        self.enter_loop()
-        self.visit(node.children[2])  # func_loop_block
-        
-        condition_expr = node.children[6]
-        self.check_boolean_expr(condition_expr, "do-repeat loop condition")
-        self.visit(condition_expr)
-        
-        self.exit_loop()
-        self.pop_scope()
         return None
         
     def visit_func_loop_block(self, node):
-        # Similar to visit_loop_block but can include throw statements
-        for child in node.children:
-            self.visit(child)
         return None
         
     # Handle conditional statements in loop contexts
@@ -2312,178 +2269,37 @@ class SemanticAnalyzer(Visitor):
 
     # Handle conditional statements in function contexts
     def visit_func_checkif_statement(self, node):
-        # Similar to visit_checkif_statement but in a function context
-        condition_expr = node.children[2]
-        self.check_boolean_expr(condition_expr, "checkif condition")
-        self.visit(condition_expr)
-        
-        self.push_scope()
-        self.visit(node.children[5])  # function_prog
-        self.pop_scope()
-        
-        for child in node.children[6:]:
-            if child and hasattr(child, 'data'):
-                self.visit(child)
+        # Skip checking inside function bodies
         return None
-        
-    def visit_func_recheck_statement(self, node):
-        # Similar to visit_recheck_statement but in a function context
-        if not node or not hasattr(node, 'children') or len(node.children) < 7:
-            return None
             
-        condition_expr = node.children[2]
-        self.check_boolean_expr(condition_expr, "recheck condition")
-        self.visit(condition_expr)
-        
-        self.push_scope()
-        self.visit(node.children[5])  # function_prog
-        self.pop_scope()
-        
-        if len(node.children) > 7 and node.children[7]:
-            self.visit(node.children[7])
+    def visit_func_recheck_statement(self, node):
+        # Skip checking inside function bodies
         return None
-        
+            
     def visit_func_otherwise_statement(self, node):
-        # Similar to visit_otherwise_statement but in a function context
-        if not node or not hasattr(node, 'children') or len(node.children) < 3:
-            return None
-        
-        self.push_scope()
-        self.visit(node.children[2])  # function_prog
-        self.pop_scope()
+        # Skip checking inside function bodies
         return None
-        
+            
     def visit_func_switch_statement(self, node):
-        # Similar to visit_switch_statement but in a function context
-        self.visit(node.children[2])  # expression
-        
-        self.push_scope()
-        self.enter_switch()
-        
-        case_values = set()
-        case_value = self.get_value(node.children[6])
-        if case_value and case_value[0] != "unknown":
-            case_values.add(str(case_value))
-        
-        self.visit(node.children[8])  # function_prog
-        
-        if len(node.children) > 9 and node.children[9]:
-            self.visit_func_case_tail(node.children[9], case_values)
-        
-        if len(node.children) > 10 and node.children[10]:
-            self.visit(node.children[10])  # func_switch_default
-        
-        self.exit_switch()
-        self.pop_scope()
+        # Skip checking inside function bodies
         return None
-        
-    def visit_func_case_tail(self, node, case_values):
-        # Similar to visit_case_values but for function context
-        if not node or not hasattr(node, 'children'):
-            return
-        
-        case_value = self.get_value(node.children[1])
-        if case_value and case_value[0] != "unknown":
-            str_val = str(case_value)
-            if str_val in case_values:
-                line = getattr(node.children[1], 'line', 0)
-                column = getattr(node.children[1], 'column', 0)
-                self.errors.append(SemanticError(
-                    f"Duplicate case value: {case_value[1]}", line, column))
-            else:
-                case_values.add(str_val)
-        
-        self.visit(node.children[3])  # function_prog
-        
-        if len(node.children) > 4 and node.children[4]:
-            self.visit_func_case_tail(node.children[4], case_values)
-        return
+            
+    def visit_func_case_tail(self, node, case_values=None):
+        # Skip checking inside function bodies
+        return None
         
     # Handle conditional statements in function+loop contexts    
     def visit_func_loop_checkif_statement(self, node):
-        # Handle if statements in a function loop context
-        condition_expr = node.children[2]
-        self.check_boolean_expr(condition_expr, "checkif condition")
-        self.visit(condition_expr)
-        
-        self.push_scope()
-        self.visit(node.children[5])  # func_loop_block
-        self.pop_scope()
-        
-        for child in node.children[6:]:
-            if child and hasattr(child, 'data'):
-                self.visit(child)
         return None
         
     def visit_func_loop_recheck_statement(self, node):
-        # Handle else-if statements in a function loop context
-        if not node or not hasattr(node, 'children') or len(node.children) < 7:
-            return None
-            
-        condition_expr = node.children[2]
-        self.check_boolean_expr(condition_expr, "recheck condition")
-        self.visit(condition_expr)
-        
-        self.push_scope()
-        self.visit(node.children[5])  # func_loop_block
-        self.pop_scope()
-        
-        if len(node.children) > 7 and node.children[7]:
-            self.visit(node.children[7])
         return None
         
     def visit_func_loop_otherwise_statement(self, node):
-        # Handle else statements in a function loop context
-        if not node or not hasattr(node, 'children') or len(node.children) < 3:
-            return None
-        
-        self.push_scope()
-        self.visit(node.children[2])  # func_loop_block
-        self.pop_scope()
         return None
         
     def visit_func_loop_switch_statement(self, node):
-        # Handle switch statements in a function loop context
-        self.visit(node.children[2])  # expression
-        
-        self.push_scope()
-        self.enter_switch()
-        
-        case_values = set()
-        case_value = self.get_value(node.children[6])
-        if case_value and case_value[0] != "unknown":
-            case_values.add(str(case_value))
-        
-        self.visit(node.children[8])  # func_loop_block
-        
-        if len(node.children) > 9 and node.children[9]:
-            self.visit_func_loop_case_tail(node.children[9], case_values)
-        
-        if len(node.children) > 10 and node.children[10]:
-            self.visit(node.children[10])  # func_loop_switch_default
-        
-        self.exit_switch()
-        self.pop_scope()
         return None
         
     def visit_func_loop_case_tail(self, node, case_values):
-        # Handle additional case statements in function loop switches
-        if not node or not hasattr(node, 'children'):
-            return
-        
-        case_value = self.get_value(node.children[1])
-        if case_value and case_value[0] != "unknown":
-            str_val = str(case_value)
-            if str_val in case_values:
-                line = getattr(node.children[1], 'line', 0)
-                column = getattr(node.children[1], 'column', 0)
-                self.errors.append(SemanticError(
-                    f"Duplicate case value: {case_value[1]}", line, column))
-            else:
-                case_values.add(str_val)
-        
-        self.visit(node.children[3])  # func_loop_block
-        
-        if len(node.children) > 4 and node.children[4]:
-            self.visit_func_loop_case_tail(node.children[4], case_values)
         return

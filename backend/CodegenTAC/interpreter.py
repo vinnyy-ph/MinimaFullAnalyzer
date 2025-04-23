@@ -486,14 +486,50 @@ class TACInterpreter:
                 raise ValueError(f"Function not defined: {arg1}")
 
         elif op == 'ASSIGN':
-            value = self.resolve_variable(arg1)
-            self.memory[result] = value
-            if self.debug_mode and result in ('i', 'j', 'k'):  # Track loop variables
-                print(f"Assigned {value} to {result}")
+            # Special case for empty list initialization
+            if arg1 == ']':
+                # This is a pattern that indicates an empty list initialization
+                self.memory[result] = []
+                if self.debug_mode:
+                    print(f"Initialized empty list: {result} = []")
+            else:
+                # Normal assignment
+                value = self.resolve_variable(arg1)
+                self.memory[result] = value
+                if self.debug_mode and result in ('i', 'j', 'k'):  # Track loop variables
+                    print(f"Assigned {value} to {result}")
 
         elif op == 'ADD':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
+            
+            # Handle list concatenation (new functionality)
+            if isinstance(left_val, list):
+                if isinstance(right_val, list):
+                    # Special handling for lists - resolve each item properly
+                    resolved_right = []
+                    for item in right_val:
+                        # If item is a tuple like ('id', 'q'), look up the variable value
+                        if isinstance(item, tuple) and len(item) >= 2 and item[0] == 'id':
+                            var_name = item[1]
+                            if var_name in self.memory:
+                                resolved_right.append(self.memory[var_name])
+                            else:
+                                # If variable not found, just use the name as fallback
+                                resolved_right.append(var_name)
+                        else:
+                            resolved_right.append(item)
+                    
+                    # Now concatenate with properly resolved values
+                    self.memory[result] = left_val + resolved_right
+                else:
+                    # Append a single element to create a new list
+                    self.memory[result] = left_val + [right_val]
+                return
+            elif isinstance(right_val, list):
+                # Prepend a single element to create a new list
+                self.memory[result] = [left_val] + right_val
+                return
             
             # Handle string concatenation vs numeric addition
             # First check if the values are strings and not empty before attempting indexing operations
@@ -546,7 +582,57 @@ class TACInterpreter:
                         raise e
                     # Fallback to string concatenation if conversion fails
                     self.memory[result] = str(left_val) + str(right_val)
-
+                    
+        elif op == 'LIST_EXTEND':
+            # Get the list to be modified
+            list_var = self.resolve_variable(arg1)
+            # Get the value to extend with
+            extension = self.resolve_variable(arg2)
+            
+            # Make sure list_var is actually a list
+            if not isinstance(list_var, list):
+                list_var = []
+                self.memory[arg1] = list_var
+            
+            # Handle different extension scenarios
+            if isinstance(extension, list):
+                # Extend with another list - properly resolve each item
+                resolved_extension = []
+                for item in extension:
+                    # If the item is a variable name, resolve it
+                    if isinstance(item, str):
+                        # Check if this is a variable reference that needs resolution
+                        resolved_item = self.resolve_variable(item)
+                        # If resolution didn't change anything, it wasn't a variable
+                        if resolved_item == item and item in self.memory:
+                            resolved_item = self.memory[item]
+                        resolved_extension.append(resolved_item)
+                    # If it's a tuple (from the TACGenerator), extract the value
+                    elif isinstance(item, tuple) and len(item) >= 2:
+                        # Important fix: If it's an id tuple, resolve the variable name
+                        if item[0] == 'id' and isinstance(item[1], str):
+                            var_name = item[1]
+                            if var_name in self.memory:
+                                resolved_extension.append(self.memory[var_name])
+                            else:
+                                resolved_extension.append(var_name)  # Fallback to name if not found
+                        else:
+                            # For non-id tuples, just use the value part
+                            resolved_extension.append(item[1])
+                    else:
+                        resolved_extension.append(item)
+                
+                list_var.extend(resolved_extension)
+            else:
+                # Resolve single item if needed
+                if isinstance(extension, str) and extension in self.memory:
+                    extension = self.memory[extension]
+                list_var.append(extension)
+            
+            # If result is provided, assign the modified list to it
+            if result is not None:
+                self.memory[result] = list_var
+                
         elif op == 'SUB':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
@@ -690,13 +776,25 @@ class TACInterpreter:
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
             try:
-                # Convert to correct types for comparison
-                if isinstance(left_val, str) and left_val.isdigit():
-                    left_val = int(left_val)
-                if isinstance(right_val, str) and right_val.isdigit():
-                    right_val = int(right_val)
+                # Special handling for None values
+                if left_val is None and right_val is None:
+                    # None == None, so None < None is False
+                    self.memory[result] = False
+                elif left_val is None:
+                    # None is less than everything else
+                    self.memory[result] = True
+                elif right_val is None:
+                    # Nothing is less than None
+                    self.memory[result] = False
+                else:
+                    # Convert to correct types for comparison
+                    if isinstance(left_val, str) and left_val.isdigit():
+                        left_val = int(left_val)
+                    if isinstance(right_val, str) and right_val.isdigit():
+                        right_val = int(right_val)
+                        
+                    self.memory[result] = (left_val < right_val)
                     
-                self.memory[result] = (left_val < right_val)
                 if self.debug_mode:
                     print(f"LT: {left_val} < {right_val} = {self.memory[result]}")
             except Exception as e:

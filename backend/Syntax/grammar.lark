@@ -99,7 +99,7 @@ member_tail: COMMA group_members
 var_init: ASSIGN variable_value
         | 
 
-variable_value: LSQB list_value RSQB
+variable_value: LSQB list_value? RSQB
               | expression
 
 

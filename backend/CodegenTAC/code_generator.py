@@ -359,6 +359,9 @@ class TACGenerator(Visitor):
         # Create a temporary for the list
         temp = self.get_temp()
         
+        # Mark this as a list type
+        self.variable_types[temp] = "list"
+        
         # Emit an instruction to create an empty list
         self.emit('LIST_CREATE', None, None, temp)
         
@@ -526,8 +529,14 @@ class TACGenerator(Visitor):
             
             # Handle different operand types
             if op == "+":
+                # Special handling for lists
+                if left_type == "list" or right_type == "list":
+                    # Better handling for list concatenation
+                    self.emit('ADD', left_operand, right_operand, temp)
+                    # Track the result as list type
+                    self.variable_types[temp] = "list"
                 # Special handling for text concatenation
-                if left_type == "text" or right_type == "text":
+                elif left_type == "text" or right_type == "text":
                     # For text concatenation, use CONCAT operation instead of ADD
                     self.emit('CONCAT', left_operand, right_operand, temp)
                     # Track the result as text type
@@ -541,10 +550,10 @@ class TACGenerator(Visitor):
                     else:
                         self.variable_types[temp] = "integer"
             else:  # op == "-"
-                # No subtraction for text
-                if left_type == "text" or right_type == "text":
+                # No subtraction for text or lists
+                if left_type == "text" or right_type == "text" or left_type == "list" or right_type == "list":
                     # Generate an error instruction or a placeholder
-                    self.emit('ERROR', "Cannot subtract from text", None, temp)
+                    self.emit('ERROR', "Cannot subtract from text or list", None, temp)
                 else:
                     self.emit('SUB', left_operand, right_operand, temp)
                     # If either operand is a point, result is a point
@@ -869,7 +878,15 @@ class TACGenerator(Visitor):
                 return None
         
         # Get the index expression
-        index_expr = self.visit(node.children[1])
+        index_expr_node = node.children[1]
+        
+        # Check if this is a complex expression like j+1
+        if hasattr(index_expr_node, 'data') and index_expr_node.data == 'add_expr':
+            # Handle complex expressions like j+1 by fully evaluating them first
+            index_expr = self.visit(index_expr_node)
+        else:
+            # Simple index
+            index_expr = self.visit(index_expr_node)
         
         # Extract the actual index value from tuples for variables
         if isinstance(index_expr, tuple) and len(index_expr) >= 2 and index_expr[0] == 'id':
@@ -878,10 +895,9 @@ class TACGenerator(Visitor):
         # Create a temporary variable for the result
         temp = self.get_temp()
         
-        # Generate appropriate access instruction - we'll use LIST_ACCESS for both lists and strings
-        # The interpreter will handle the distinction between list and string indexing
+        # Generate appropriate access instruction
         if is_list_access:
-            # Handle list indexing or string indexing (interpreter will determine the type)
+            # Handle list indexing or string indexing
             self.emit('LIST_ACCESS', var_name, index_expr, temp)
         else:
             # Handle group access (similar to dictionary)
