@@ -1978,13 +1978,13 @@ class SemanticAnalyzer(Visitor):
     def visit_group_or_list(self, node):
         if not node.children:
             return None
-
+    
         # Determine if this is list access or group access
         is_list_access = node.children[0].type == "LSQB"
         # Evaluate the index/key expression
         index_expr = node.children[1]
         key_value = self.get_value(index_expr)
-
+    
         # Retrieve the parent id_usage to know which variable is being accessed
         parent = getattr(node, 'parent', None)
         if parent and hasattr(parent, 'data') and parent.data == 'id_usage':
@@ -1994,20 +1994,24 @@ class SemanticAnalyzer(Visitor):
                 var_value = getattr(var_symbol, "value", None)
                 if var_value:
                     var_type = var_value[0] if isinstance(var_value, tuple) else None
-
+    
                     if is_list_access:
-                        # NEW CONDITION: Handle text indexing
+                        # Handle text indexing
                         if var_type == "text":
                             # Text character indexing
                             text_value = var_value[1]
                             if key_value[0] == "integer":
                                 idx = key_value[1]
+                                # Handle negative indices for text
+                                if idx < 0:
+                                    # Convert negative index to positive
+                                    idx = len(text_value) + idx
                                 if idx < 0 or idx >= len(text_value):
                                     # Get more accurate line and column information
                                     line = getattr(index_expr, 'line', 0)
                                     column = getattr(index_expr, 'column', 0)
                                     self.errors.append(SemanticError(
-                                        f"Text index {idx} out of range for variable '{var_name}'", 
+                                        f"Text index {key_value[1]} out of range for variable '{var_name}'", 
                                         line, column))
                                     result = ("unknown", None)
                                 else:
@@ -2020,33 +2024,25 @@ class SemanticAnalyzer(Visitor):
                             list_items = var_value[1]
                             if key_value[0] == "integer":
                                 idx = key_value[1]
+                                # Handle negative indices for lists
+                                if idx < 0:
+                                    # Convert negative index to positive
+                                    idx = len(list_items) + idx
                                 if idx < 0 or idx >= len(list_items):
-                                    # Error handling...
+                                    # Get more accurate line and column information
+                                    line = getattr(index_expr, 'line', 0)
+                                    column = getattr(index_expr, 'column', 0)
+                                    self.errors.append(ListIndexOutOfRangeError(
+                                        var_name, key_value[1], line, column))
                                     result = ("unknown", None)
                                 else:
-                                    # Return the actual element, not a wrapper
+                                    # Return the actual element at the adjusted index
                                     result = list_items[idx]
                                 self.values[id(node)] = result
                                 return result
                         elif var_type != "list":
                             self.errors.append(InvalidListAccessError(
                                 var_name, parent.children[0].line, parent.children[0].column))
-                        else:
-                            # Existing list index lookup logic
-                            list_items = var_value[1]
-                            if key_value[0] == "integer":
-                                idx = key_value[1]
-                                if idx < 0 or idx >= len(list_items):
-                                    # Get more accurate line and column information
-                                    line = getattr(index_expr, 'line', 0)
-                                    column = getattr(index_expr, 'column', 0)
-                                    self.errors.append(ListIndexOutOfRangeError(
-                                        var_name, idx, line, column))
-                                    result = ("unknown", None)
-                                else:
-                                    result = list_items[idx]
-                                self.values[id(node)] = result
-                                return result
                     else:  # Group access
                         # Existing group access logic remains unchanged
                         if var_type != "group":
@@ -2057,14 +2053,14 @@ class SemanticAnalyzer(Visitor):
                             group_members = var_value[1]  # List of (key, value) pairs
                             result = None
                             found = False
-
+    
                             for k, v in group_members:
                                 # Compare key types and values
                                 if k[0] == key_value[0] and k[1] == key_value[1]:
                                     result = v
                                     found = True
                                     break
-
+    
                             if not found:
                                 # Get more accurate line and column information
                                 line = getattr(index_expr, 'line', 0)

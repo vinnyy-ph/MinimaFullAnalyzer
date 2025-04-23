@@ -1317,29 +1317,46 @@ class TACGenerator(Visitor):
         # 5. Label for update step
         self.emit('LABEL', None, None, update_label)
         
-        # 6. Execute update expression
+        # 6. Process update expression - Enhanced to properly handle increment/decrement
         if len(node.children) > 5 and node.children[5]:
-            self.visit(node.children[5])  # update expression
+            update_node = node.children[5]
+            
+            # Check if this is just an id_usage with increment/decrement
+            if hasattr(update_node, 'data') and update_node.data == 'id_usage':
+                var_name = update_node.children[0].value
+                
+                # Look for increment/decrement operators in id_usagetail
+                for child in update_node.children[1:]:
+                    if hasattr(child, 'data') and child.data == 'id_usagetail':
+                        for subchild in child.children:
+                            if hasattr(subchild, 'data') and subchild.data == 'unary_op':
+                                if hasattr(subchild.children[0], 'type'):
+                                    op_type = subchild.children[0].type
+                                    if op_type == 'INC_OP':  # i++
+                                        self.emit('ADD', var_name, 1, var_name)
+                                    elif op_type == 'DEC_OP':  # i--
+                                        self.emit('SUB', var_name, 1, var_name)
+            
+            # If it's not a simple increment/decrement, just process normally
+            if not (hasattr(update_node, 'data') and update_node.data == 'id_usage'):
+                self.visit(update_node)
         
-        # 7. Label for condition check
+        # 7. Jump back to the condition check
+        self.emit('GOTO', None, None, cond_label)
+        
+        # 8. Label for condition check
         self.emit('LABEL', None, None, cond_label)
         
-        # 8. Evaluate condition - CRITICAL: This must happen at the start of EACH iteration
-        # Visit the condition node to generate its evaluation code
+        # 9. Evaluate condition
         condition_temp = self.visit(node.children[3])
         
-        # 9. If condition is true, go to loop body; otherwise exit
-        if isinstance(condition_temp, tuple) and len(condition_temp) >= 2:
-            condition_val = condition_temp[1]
-        else:
-            condition_val = condition_temp
-            
-        self.emit('IFTRUE', condition_val, None, body_label)
+        # 10. If condition is true, go to loop body; otherwise exit
+        self.emit('IFTRUE', condition_temp, None, body_label)
         
-        # 10. Label for loop end
+        # 11. Label for loop end
         self.emit('LABEL', None, None, end_label)
         
-        # 11. Clean up
+        # 12. Clean up
         self.loop_stack.pop()
         
         return None
