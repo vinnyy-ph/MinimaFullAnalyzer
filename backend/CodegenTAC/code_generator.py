@@ -281,76 +281,82 @@ class TACGenerator(Visitor):
         """Visit a variable value node."""
         if not node.children:
             return ('empty', None)
-        
+
         # GET operation - direct token approach (original code)
         if hasattr(node.children[0], 'type') and node.children[0].type == 'GET':
             prompt_expr = None
             if len(node.children) >= 3:
                 prompt_expr = self.visit(node.children[2])
-            
+
             temp = self.get_temp()
-            
+
             # Handle different types of prompt expressions
             if isinstance(prompt_expr, tuple) and len(prompt_expr) >= 2:
                 prompt_value = prompt_expr[1]
             elif isinstance(prompt_expr, str):
-                prompt_value = prompt_expr
+                # Handle string literals correctly (remove quotes)
+                if prompt_expr.startswith('"') and prompt_expr.endswith('"'):
+                    prompt_value = prompt_expr[1:-1]
+                else:
+                    prompt_value = prompt_expr
             else:
-                prompt_value = ""
-                
+                prompt_value = "" # Default prompt if none provided or invalid
+
             # Emit INPUT instruction with the prompt
             self.emit('INPUT', prompt_value, None, temp)
-            
+
             # Return as a text type since input is always treated as text
+            self.variable_types[temp] = 'text' # Ensure type is tracked
             return ('text', temp)
-        
+
         # NEW: Check for get() function call through id_usage node
         if hasattr(node.children[0], 'data') and node.children[0].data == 'id_usage':
             id_usage_node = node.children[0]
-            if (len(id_usage_node.children) > 0 and 
-                hasattr(id_usage_node.children[0], 'value') and 
+            if (len(id_usage_node.children) > 0 and
+                hasattr(id_usage_node.children[0], 'value') and
                 id_usage_node.children[0].value == 'get'):
-                
+
                 # It's a get() function call
-                if (len(id_usage_node.children) > 1 and 
-                    hasattr(id_usage_node.children[1], 'data') and 
+                if (len(id_usage_node.children) > 1 and
+                    hasattr(id_usage_node.children[1], 'data') and
                     id_usage_node.children[1].data == 'func_call'):
-                    
+
                     # Default prompt
-                    prompt = "Enter a value:"
-                    
+                    prompt = "" # Default prompt
+
                     # Extract prompt from arguments if available
                     if len(id_usage_node.children[1].children) > 1:
                         args_node = id_usage_node.children[1].children[1]
                         if hasattr(args_node, 'data') and args_node.data == 'args' and args_node.children:
                             prompt_expr = self.visit(args_node.children[0])
-                            
+
                             # Handle string literals
                             if isinstance(prompt_expr, str):
                                 if prompt_expr.startswith('"') and prompt_expr.endswith('"'):
                                     prompt = prompt_expr[1:-1]  # Remove the quotes
                                 else:
                                     prompt = prompt_expr
-                            
+
                             # Handle tuples like ('text', 'hello')
                             elif isinstance(prompt_expr, tuple) and len(prompt_expr) >= 2:
                                 if prompt_expr[0] == 'text':
                                     prompt = prompt_expr[1]
                                 else:
                                     prompt = str(prompt_expr[1])
-                    
+
                     # Create temp variable and emit INPUT instruction
                     temp = self.get_temp()
                     self.emit('INPUT', prompt, None, temp)
+                    self.variable_types[temp] = 'text' # Ensure type is tracked
                     return ('text', temp)  # Return as text type
-        
+
         # Check if this is a list literal
         if hasattr(node.children[0], 'type') and node.children[0].type == 'LSQB':
             # This is a list literal [...]
             if len(node.children) > 1:
                 # Visit the list_value node to get the list items
                 return self.visit(node.children[1])
-        
+
         # List or expression
         return self.visit(node.children[0])
 
@@ -641,10 +647,10 @@ class TACGenerator(Visitor):
                 len(node.children) >= 4 and  # Has at least GET ( operand )
                 hasattr(node.children[1], 'type') and node.children[1].type == 'LPAREN' and
                 hasattr(node.children[3], 'type') and node.children[3].type == 'RPAREN'):
-            
+
             # Extract the prompt from get_operand
             prompt_expr = self.visit(node.children[2])  # This should be the get_operand node
-            
+
             # Get prompt value from the expression
             if isinstance(prompt_expr, tuple) and len(prompt_expr) >= 2:
                 prompt_value = prompt_expr[1]
@@ -654,17 +660,18 @@ class TACGenerator(Visitor):
                 else:
                     prompt_value = prompt_expr
             else:
-                prompt_value = ""
-            
+                prompt_value = "" # Default prompt
+
             # Create a temporary variable for the input result
             temp = self.get_temp()
-            
+
             # Generate the INPUT instruction
             self.emit('INPUT', prompt_value, None, temp)
-            
+
             # Return the temp variable as text type
+            self.variable_types[temp] = 'text' # Ensure type is tracked
             return ('text', temp)
-        
+
         # Handle other operand types
         return self.visit(node.children[0])
 
@@ -673,20 +680,20 @@ class TACGenerator(Visitor):
 
     def visit_id_usage(self, node):
         var_name = node.children[0].value
-        
+
         # Function call?
         if len(node.children) > 1 and hasattr(node.children[1], 'data') and node.children[1].data == 'func_call':
             # Handle get() function specially
             if var_name == 'get':
                 # Get prompt (default if none provided)
                 prompt = ""  # Default prompt
-                
+
                 # Extract prompt from arguments if available
                 if len(node.children[1].children) > 1:
                     args_node = node.children[1].children[1]
                     if hasattr(args_node, 'data') and args_node.data == 'args' and args_node.children:
                         prompt_expr = self.visit(args_node.children[0])
-                        
+
                         # Handle string literals
                         if isinstance(prompt_expr, str):
                             # If it's a string literal with quotes
@@ -694,7 +701,7 @@ class TACGenerator(Visitor):
                                 prompt = prompt_expr[1:-1]  # Remove the quotes
                             else:
                                 prompt = prompt_expr
-                        
+
                         # Handle tuples like ('text', 'hello')
                         elif isinstance(prompt_expr, tuple) and len(prompt_expr) >= 2:
                             # If it's a tuple with a type and a value
@@ -704,13 +711,11 @@ class TACGenerator(Visitor):
                             else:
                                 # Other type, convert to string
                                 prompt = str(prompt_expr[1])
-                
+
                 # Create temp variable and emit INPUT instruction
                 temp = self.get_temp()
-                # Ensure we pass the prompt correctly without surrounding quotes
-                if isinstance(prompt, str) and prompt.startswith('"') and prompt.endswith('"'):
-                    prompt = prompt[1:-1]
                 self.emit('INPUT', prompt, None, temp)
+                self.variable_types[temp] = 'text' # Ensure type is tracked
                 return ('text', temp)  # Return as text type (important!)
     
             # Regular function call
@@ -729,7 +734,7 @@ class TACGenerator(Visitor):
                     arg_val = self.visit(args_node)
                     if arg_val is not None:
                         args.append(arg_val)
-            
+
             # Emit PARAM instructions for each argument
             for i, arg in enumerate(args):
                 # Ensure we get the actual value, not just a reference
@@ -737,7 +742,7 @@ class TACGenerator(Visitor):
                     self.emit('PARAM', arg[1], None, i)
                 else:
                     self.emit('PARAM', arg, None, i)
-            
+
             # Create temp for return
             ret_temp = self.get_temp()
             # Pass the number of arguments in the call
@@ -749,24 +754,25 @@ class TACGenerator(Visitor):
             if hasattr(child, 'data') and child.data == 'group_or_list':
                 # This is an indexing operation
                 index_expr = self.visit(child.children[1])
-                
+
                 # Create a temporary variable for the result
                 temp = self.get_temp()
-                
+
                 # Determine if this is list or group access
                 is_list_access = child.children[0].type == "LSQB"
-                
+
                 # Extract the actual index value from tuples for variables
-                if isinstance(index_expr, tuple) and len(index_expr) >= 2 and index_expr[0] == 'id':
-                    index_expr = index_expr[1]  # Just use the variable name
-                
+                index_val = index_expr
+                if isinstance(index_expr, tuple) and len(index_expr) >= 2:
+                     index_val = index_expr[1] # Use the value part
+
                 if is_list_access:
                     # Handle list indexing
-                    self.emit('LIST_ACCESS', var_name, index_expr, temp)
+                    self.emit('LIST_ACCESS', var_name, index_val, temp)
                 else:
                     # Handle group access (similar to dictionary)
-                    self.emit('GROUP_ACCESS', var_name, index_expr, temp)
-                
+                    self.emit('GROUP_ACCESS', var_name, index_val, temp)
+
                 return temp
             
             # Check for id_usagetail (which may contain a group_or_list)
@@ -775,36 +781,47 @@ class TACGenerator(Visitor):
                     if hasattr(subchild, 'data') and subchild.data == 'group_or_list' and subchild.children:
                         # This is an indexing operation
                         index_expr = self.visit(subchild.children[1])
-                        
+
                         # Create a temporary variable for the result
                         temp = self.get_temp()
-                        
+
                         # Determine if this is list or group access
                         is_list_access = subchild.children[0].type == "LSQB"
-                        
+
+                        # Extract the actual index value from tuples for variables
+                        index_val = index_expr
+                        if isinstance(index_expr, tuple) and len(index_expr) >= 2:
+                            index_val = index_expr[1] # Use the value part
+
                         if is_list_access:
                             # Handle list indexing
-                            self.emit('LIST_ACCESS', var_name, index_expr, temp)
+                            self.emit('LIST_ACCESS', var_name, index_val, temp)
                         else:
                             # Handle group access (similar to dictionary)
-                            self.emit('GROUP_ACCESS', var_name, index_expr, temp)
-                        
+                            self.emit('GROUP_ACCESS', var_name, index_val, temp)
+
                         return temp
 
-            # Check if this is an increment/decrement operation
-            if subchild.data == 'unary_op':
-                if subchild.children and hasattr(subchild.children[0], 'type'):
-                    op_type = subchild.children[0].type
-                    if op_type == 'INC_OP':  # i++
-                        # Save current value to temp variable
-                        temp = self.get_temp()
-                        self.emit('ASSIGN', var_name, None, temp)
-                        
-                        # Increment the variable
-                        self.emit('ADD', var_name, 1, var_name)
-                        
-                        # Return the original value (post-increment)
-                        return temp            
+                    # Check if this is an increment/decrement operation
+                    if hasattr(subchild, 'data') and subchild.data == 'unary_op':
+                        if subchild.children and hasattr(subchild.children[0], 'type'):
+                            op_type = subchild.children[0].type
+                            if op_type == 'INC_OP':  # i++
+                                # Save current value to temp variable
+                                temp = self.get_temp()
+                                self.emit('ASSIGN', var_name, None, temp)
+                                # Increment the variable
+                                self.emit('ADD', var_name, 1, var_name)
+                                # Return the original value (post-increment)
+                                return temp
+                            elif op_type == 'DEC_OP': # i--
+                                # Save current value to temp variable
+                                temp = self.get_temp()
+                                self.emit('ASSIGN', var_name, None, temp)
+                                # Decrement the variable
+                                self.emit('SUB', var_name, 1, var_name)
+                                # Return the original value (post-decrement)
+                                return temp
 
         # Normal variable usage
         return ('id', var_name)
