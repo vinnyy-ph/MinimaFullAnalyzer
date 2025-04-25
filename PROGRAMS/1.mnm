@@ -17,8 +17,12 @@ func is_prime(num) {
 var n = integer(get("Enter a number: "));
 var check = is_prime(n);
 
-checkif (check == YES) {
-    show(text(n) + " is a prime number.");
+checkif(n < 0) {
+    show("Integer should be postive !");
 } otherwise {
-    show(text(n) + " is not a prime number.");
+    checkif (check == YES) {
+    show(text(n) + " is a prime number.");
+    } otherwise {
+        show(text(n) + " is not a prime number.");
+    }
 }

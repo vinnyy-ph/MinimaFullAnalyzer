@@ -11,6 +11,20 @@ import traceback
 # Store execution states
 execution_states = {}
 
+def format_minima_output(output_text):
+    """
+    Ensure all negative numbers in output are displayed with tilde notation.
+    This provides a second layer of formatting in case the interpreter missed anything.
+    """
+    import re
+    
+    # Replace minus signs with tildes in numeric output
+    # Careful not to replace minus signs in other contexts
+    # This regex looks for minus signs followed by digits
+    formatted_text = re.sub(r'-(\d+(\.\d+)?)', r'~\1', output_text)
+    
+    return formatted_text
+
 def execute_code(code, execution_id=None, user_input=None):
     """
     Execute Minima code and return the results.
@@ -40,10 +54,15 @@ def execute_code(code, execution_id=None, user_input=None):
         interpreter, state = execution_states.pop(execution_id)
         
         try:
+            # Convert tilde negative notation if needed in user input
+            if isinstance(user_input, str) and user_input.startswith('~'):
+                # No need to convert here, the interpreter will handle it
+                pass
+            
             # Provide the user input and resume execution
             output = interpreter.resume_with_input(user_input)
             results['success'] = True
-            results['output'] = output
+            results['output'] = format_minima_output(output)  # Apply formatting
             results['tac'] = interpreter.instructions
             results['formattedTAC'] = format_tac_instructions(interpreter.instructions)
             
@@ -66,8 +85,6 @@ def execute_code(code, execution_id=None, user_input=None):
             results['terminalOutput'] += f"\nWaiting for input with prompt: {interpreter.input_prompt}"
         
         return results
-    
-    # Normal execution (not resuming)
     try:
         # Lexical Analysis
         lexer = Lexer(code)
@@ -166,6 +183,9 @@ def execute_code(code, execution_id=None, user_input=None):
         results['error'] = f"Execution Error: {str(e)}"
         results['terminalOutput'] += f"Error during compilation: {str(e)}\n"
         results['terminalOutput'] += traceback.format_exc()
+    
+    if 'output' in results and results['output']:
+        results['output'] = format_minima_output(results['output'])    
     
     return results
 

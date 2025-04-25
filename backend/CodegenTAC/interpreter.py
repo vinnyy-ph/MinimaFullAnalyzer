@@ -88,6 +88,21 @@ class TACInterpreter:
         # For numeric literals (integers, floats)
         if isinstance(val, (int, float)):
             return val
+        
+        # Handle tilde-prefixed negative numbers in string form
+        if isinstance(val, str) and val.startswith('~') and len(val) > 1:
+            try:
+                # Check if it's a negative integer
+                if val[1:].isdigit():
+                    return -int(val[1:])
+                # Check if it's a negative float
+                else:
+                    try:
+                        return -float(val[1:])
+                    except ValueError:
+                        pass  # Not a valid negative number, continue processing
+            except ValueError:
+                pass  # Not a valid negative number, continue processing
             
         # For string literals (already resolved)
         if isinstance(val, str) and (val.startswith('"') and val.endswith('"')):
@@ -126,9 +141,14 @@ class TACInterpreter:
         # Try numeric conversion for string literals
         if isinstance(val, str):
             try:
+                # Check for tilde-prefixed negative numbers again to handle any edge cases
+                if val.startswith('~'):
+                    return -int(val[1:])
                 return int(val) 
             except ValueError:
                 try:
+                    if val.startswith('~'):
+                        return -float(val[1:])
                     return float(val)
                 except ValueError:
                     pass
@@ -283,14 +303,24 @@ class TACInterpreter:
         
         # Try to convert input to number if possible
         try:
-            # Check if it's an integer
-            input_val = int(user_input)
+            # Check if it's a tilde-prefixed negative number
+            if user_input.startswith('~') and len(user_input) > 1:
+                # Convert tilde notation to minus sign for internal processing
+                input_val = -int(user_input[1:])
+            else:
+                # Regular integer conversion
+                input_val = int(user_input)
             # Validate the number
             input_val = self.validate_number(input_val)
         except ValueError:
             try:
                 # Try float if integer conversion failed
-                input_val = float(user_input)
+                if user_input.startswith('~') and len(user_input) > 1:
+                    # Convert tilde notation to minus sign for internal processing
+                    input_val = -float(user_input[1:])
+                else:
+                    # Regular float conversion
+                    input_val = float(user_input)
                 # Validate the number
                 input_val = self.validate_number(input_val)
             except ValueError:
