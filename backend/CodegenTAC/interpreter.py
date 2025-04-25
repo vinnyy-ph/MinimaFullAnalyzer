@@ -55,6 +55,13 @@ class TACInterpreter:
             return None
         if val == 'empty':
             return None
+        # Add handling for identifier tuples
+        if isinstance(val, tuple) and len(val) >= 2 and val[0] == 'id':
+            # Handle id tuples by looking up the variable name in memory
+            var_name = val[1]
+            if var_name in self.memory:
+                return self.memory[var_name]
+            return var_name  # Fall back to the variable name if not found
         if isinstance(val, str) and val in self.memory:
             return self.memory[val]
         if isinstance(val, (int, float)):
@@ -296,11 +303,14 @@ class TACInterpreter:
             if self.call_stack:
                 return_val = self.resolve_variable(arg1)
                 old_ctx = self.call_stack.pop()
-                if old_ctx['return_var']:
-                    old_ctx['memory'][old_ctx['return_var']] = return_val
+                # Restore the previous memory scope
                 self.memory = old_ctx['memory']
+                # Assign the return value *after* restoring the memory
+                if old_ctx['return_var']:
+                    self.memory[old_ctx['return_var']] = return_val
                 self.ip = old_ctx['ip']
             else:
+                # If no call stack, returning effectively ends the program
                 self.ip = len(self.instructions)
         elif op == 'FUNCTION':
             pass
@@ -312,39 +322,69 @@ class TACInterpreter:
             print(f"DEBUG - Param instruction: index={result}, value={val}")
         elif op == 'CALL':
             if arg1 in self.functions:
+                # Store current state (IP, memory, return variable target)
                 context = {
                     'ip': self.ip + 1,
-                    'memory': dict(self.memory),
+                    'memory': dict(self.memory), # Save a copy of the current memory
                     'return_var': result
                 }
+                self.call_stack.append(context) # Push context onto the call stack
+
                 func_label = self.functions[arg1]
                 if func_label in self.labels:
-                    self.call_stack.append(context)
-                    new_memory = {}
+                    # Prepare the memory for the function call
+                    # Start with a copy of the caller's memory to inherit scope
+                    new_memory = dict(self.memory) # Inherit caller's memory
+
                     param_count = arg2 if isinstance(arg2, int) else 0
                     param_names = self.function_params.get(arg1, [])
-                    print(f"DEBUG - Function {arg1} called with {param_count} params, expected names: {param_names}")
-                    print(f"DEBUG - Param stack: {self.param_stack}")
-                    if param_names and param_count > 0:
-                        for i, param_name in enumerate(param_names):
-                            if i >= param_count:
-                                break  
-                            param_value = None
-                            for p_idx, p_val in self.param_stack:
-                                if p_idx == i:
-                                    param_value = p_val
-                                    break
-                            if param_value is not None:
-                                resolved_val = param_value
-                                if isinstance(param_value, str) and param_value in self.memory:
-                                    resolved_val = self.memory[param_value]
-                                elif isinstance(param_value, tuple) and len(param_value) >= 2:
-                                    resolved_val = param_value[1]
-                                new_memory[param_name] = resolved_val
-                                print(f"DEBUG - Parameter {param_name} = {resolved_val}")
-                    self.memory = new_memory
-                    self.ip = self.labels[func_label]
-                    self.param_stack = []
+
+                    if self.debug_mode:
+                        print(f"DEBUG - Function {arg1} called with {param_count} params, expected names: {param_names}")
+                        print(f"DEBUG - Param stack before processing: {self.param_stack}")
+                        print(f"DEBUG - Caller memory before param assignment: {new_memory}")
+
+
+                    # Assign parameters from the param_stack to the new_memory
+                    # Parameters pushed via PARAM override any inherited variables with the same name
+                    temp_param_stack = self.param_stack[:] # Work with a copy
+
+                    # Process parameters in the correct order (0 to n-1)
+                    for i in range(param_count):
+                         param_name = param_names[i] if i < len(param_names) else f"param_{i}" # Handle potential extra params
+                         param_value = None
+
+                         # Find the parameter value with the matching index 'i' from the stack
+                         found_param = False
+                         remaining_params = []
+                         for p_idx, p_val in temp_param_stack:
+                             if p_idx == i:
+                                 param_value = p_val
+                                 found_param = True
+                                 # Don't add this back to remaining_params, effectively consuming it
+                             else:
+                                 remaining_params.append((p_idx, p_val))
+
+                         if found_param:
+                             # Resolve the parameter value using the *caller's* context before overwriting memory
+                             resolved_val = self.resolve_variable(param_value)
+                             new_memory[param_name] = resolved_val # Assign to function's scope
+                             if self.debug_mode:
+                                 print(f"DEBUG - Parameter '{param_name}' (index {i}) = {resolved_val} (from stack value {param_value})")
+                         elif self.debug_mode:
+                             print(f"DEBUG - Parameter '{param_name}' (index {i}) not found on stack.")
+
+                         temp_param_stack = remaining_params # Update stack for next iteration
+
+
+                    self.memory = new_memory # Set the interpreter's memory to the function's scope
+                    self.ip = self.labels[func_label] # Jump to the function's entry point
+                    self.param_stack = [] # Clear the parameter stack for the next call
+
+                    if self.debug_mode:
+                        print(f"DEBUG - Function memory after param assignment: {self.memory}")
+                        print(f"DEBUG - Jumping to label {func_label} at instruction {self.ip}")
+
                 else:
                     raise ValueError(f"Function label not found: {func_label}")
             else:
@@ -493,48 +533,77 @@ class TACInterpreter:
             else:
                 self.memory[arg1] = list_var
         elif op == 'LIST_SET':
-            list_var = self.resolve_variable(arg1)
-            index_raw = self.resolve_variable(arg2) # Get the raw index value/tuple
-            value = self.resolve_variable(result)
+            list_var_name = arg1 # Keep the name for potential modification
+            # list_var = self.resolve_variable(list_var_name) # Fetching list later
+            index_raw = arg2 # Keep the raw index argument (e.g., ('id', 'l'), 0, t1)
+            value_raw = result # Keep the raw value argument
+            value = self.resolve_variable(value_raw) # Resolve the value to be assigned
 
-            # Extract the actual index value if it's a tuple
-            if isinstance(index_raw, tuple) and len(index_raw) >= 2:
-                index = index_raw[1]
+            # Resolve the index variable/literal using the current memory scope
+            # This should return the *actual value* (e.g., the integer value of 'l')
+            index = self.resolve_variable(index_raw)
+
+            # Ensure the target variable holds a list
+            # Re-fetch from memory to ensure we have the actual list, not a copy
+            if list_var_name not in self.memory or not isinstance(self.memory[list_var_name], list):
+                 # If the variable exists but isn't a list, raise error
+                 if list_var_name in self.memory:
+                      raise ValueError(f"Cannot assign to index of non-list variable '{list_var_name}' which holds type {type(self.memory[list_var_name]).__name__}")
+                 # If variable doesn't exist, Minima might implicitly create it?
+                 # Let's initialize it as an empty list for now, consistent with potential dynamic typing.
+                 self.memory[list_var_name] = []
+                 list_var = self.memory[list_var_name]
+                 if self.debug_mode:
+                     print(f"DEBUG - Variable '{list_var_name}' not found or not a list, initialized as [].")
             else:
-                index = index_raw
+                # Ensure list_var points to the list in memory, not a copy
+                list_var = self.memory[list_var_name]
 
-            if isinstance(list_var, list):
-                # Convert index to integer if possible
-                try:
-                    if isinstance(index, str) and index.isdigit():
-                        index = int(index)
-                    elif isinstance(index, str) and index.startswith('~') and index[1:].isdigit():
-                        index = -int(index[1:])
-                    elif not isinstance(index, int):
-                        # Attempt conversion only if not already an int
-                        index = int(index)
-                except (ValueError, TypeError):
-                    # Raise error with the original raw index for clarity
-                    raise ValueError(f"Invalid list index: {index_raw}")
 
-                # Handle negative index normalization
-                if index < 0:
-                    normalized_index = index + len(list_var)
+            # Convert resolved index to integer if possible
+            # The 'index' variable now holds the actual resolved value (int, float, etc.)
+            try:
+                if isinstance(index, str) and index.isdigit():
+                    index_int = int(index)
+                elif isinstance(index, str) and index.startswith('~') and index[1:].isdigit():
+                    index_int = -int(index[1:])
+                elif isinstance(index, int):
+                    index_int = index # Already an int
+                elif isinstance(index, float) and index.is_integer():
+                     index_int = int(index) # Allow float indices if they are whole numbers
                 else:
-                    normalized_index = index
+                    # Attempt conversion for other types if not already handled
+                    index_int = int(index)
+            except (ValueError, TypeError):
+                # Raise error with the original raw index for clarity if conversion fails
+                # Use index_raw in the message as 'index' might be the resolved value
+                raise ValueError(f"Invalid list index value: {index} (from raw index '{index_raw}')")
 
-                # Extend the list if needed for positive indices
-                if normalized_index >= len(list_var) and normalized_index >= 0:
-                    # Extend the list with None values
-                    while len(list_var) <= normalized_index:
-                        list_var.append(None)
-                    list_var[normalized_index] = value
-                elif 0 <= normalized_index < len(list_var):
-                    list_var[normalized_index] = value
-                else:
-                    raise ValueError(f"List index out of range: {index}")
+            # Handle negative index normalization
+            list_len = len(list_var)
+            if index_int < 0:
+                normalized_index = index_int + list_len
             else:
-                raise ValueError(f"Cannot assign to index of non-list: {arg1}")
+                normalized_index = index_int
+
+            # Extend the list if needed for positive indices (Minima allows out-of-bounds assignment)
+            if normalized_index >= list_len and normalized_index >= 0:
+                # Extend the list with None (empty) values
+                list_var.extend([None] * (normalized_index - list_len + 1))
+                list_var[normalized_index] = value
+                # No need to update self.memory[list_var_name] = list_var as we modified the list in-place
+                if self.debug_mode:
+                    print(f"DEBUG - Extended list '{list_var_name}' and set index {normalized_index} to {value}")
+
+            elif 0 <= normalized_index < list_len:
+                 # Assign value to existing index
+                list_var[normalized_index] = value
+                 # No need to update self.memory[list_var_name] = list_var as we modified the list in-place
+                if self.debug_mode:
+                    print(f"DEBUG - Set list '{list_var_name}' index {normalized_index} to {value}")
+            else:
+                 # This case (negative index out of bounds after normalization)
+                raise ValueError(f"List index out of range: {index_int} (normalized: {normalized_index}) for list of length {list_len}")
         elif op == 'SUB':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
@@ -839,67 +908,75 @@ class TACInterpreter:
 
             try:
                 # Resolve the index variable/literal first
-                resolved_index = self.resolve_variable(index_raw)
-
-                # Extract the actual index value if it's a tuple
-                if isinstance(resolved_index, tuple) and len(resolved_index) >= 2:
-                    index = resolved_index[1]
-                else:
-                    index = resolved_index
+                # This should return the *actual value* (e.g., the integer value of 'i')
+                index = self.resolve_variable(index_raw)
 
                 # Convert index to integer if possible
+                # The 'index' variable now holds the actual resolved value
                 try:
                     if isinstance(index, str) and index.isdigit():
-                        index = int(index)
+                        index_int = int(index)
                     elif isinstance(index, str) and index.startswith('~') and index[1:].isdigit():
-                        index = -int(index[1:])
-                    elif not isinstance(index, int):
-                         # Attempt conversion only if not already an int
-                        index = int(index)
+                        index_int = -int(index[1:])
+                    elif isinstance(index, int):
+                        index_int = index # Already an int
+                    elif isinstance(index, float) and index.is_integer():
+                        index_int = int(index) # Allow float indices if they are whole numbers
+                    else:
+                        # Attempt conversion for other types if not already handled
+                        index_int = int(index)
                 except (ValueError, TypeError):
                     # Use original raw index in error message
-                    raise ValueError(f"Invalid list index: {index_raw}")
+                    raise ValueError(f"Invalid list index value: {index} (from raw index '{index_raw}')")
 
             except Exception as e:
                  # Use original raw index in error message
                 raise ValueError(f"Error resolving list index '{index_raw}': {e}")
 
             try:
+                # Use index_int for calculations and checks from here
                 if isinstance(list_var, list):
                     # Handle list access
                     list_length = len(list_var)
 
                     # Normalize negative index to positive equivalent
-                    if index < 0:
-                        normalized_index = index + list_length
+                    if index_int < 0:
+                        normalized_index = index_int + list_length
                     else:
-                        normalized_index = index
+                        normalized_index = index_int
 
                     if 0 <= normalized_index < list_length:
                         self.memory[result] = list_var[normalized_index]
                     else:
-                        raise IndexError(f"List index {index} out of range for list of length {list_length}")
+                        # Out of bounds for list, return 'empty' (None)
+                        self.memory[result] = None
+                        if self.debug_mode:
+                            print(f"List index {index_int} out of range for list of length {list_length}. Returning 'empty'.")
 
                 elif isinstance(list_var, str):
                     # Handle string access (treat strings like lists of characters)
                     string_length = len(list_var)
 
                     # Normalize negative index to positive equivalent
-                    if index < 0:
-                        normalized_index = index + string_length
+                    if index_int < 0:
+                        normalized_index = index_int + string_length
                     else:
-                        normalized_index = index
+                        normalized_index = index_int
 
                     if 0 <= normalized_index < string_length:
                         self.memory[result] = list_var[normalized_index]
                     else:
-                         raise IndexError(f"String index {index} out of range for string of length {string_length}")
+                         # Out of bounds for string, return 'empty' (None)
+                         self.memory[result] = None
+                         if self.debug_mode:
+                             print(f"String index {index_int} out of range for string of length {string_length}. Returning 'empty'.")
 
                 else:
                     if self.debug_mode:
                         print(f"Warning: Attempted LIST_ACCESS on non-list/non-string variable '{arg1}'")
                     self.memory[result] = None # Or raise error? Minima might allow this returning 'empty'
             except IndexError as e:
+                 # This block might not be reached if we handle out-of-bounds above
                  raise ValueError(f"Runtime Error: {e}")
             except Exception as e:
                 if self.debug_mode:
