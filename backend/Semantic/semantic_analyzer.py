@@ -172,48 +172,42 @@ class SemanticAnalyzer(Visitor):
 
     def extract_literal(self, node):
         """
-        Drill down into a node to extract the actual literal.
-        If the node is a Tree with data 'var_init' or 'variable_value',
-        unwrap it to return the literal token.
+        Drill down into a node to find the core value node (literal, expression, list, get).
+        If the node is 'var_init', get its value part.
+        If the node is 'variable_value', return it if it's a list or GET, otherwise drill down.
         """
         if node is None:
             return None
-            
-        # NEW CODE: Check for expression with list access on non-list variables
-        if hasattr(node, "data") and node.data == "expression":
-            self._validate_expression_for_list_access(node)
-        
-        if hasattr(node, "data"):
-            if node.data == "var_init":
-                if node.children and len(node.children) >= 2:
-                    return self.extract_literal(node.children[1])
-                else:
-                    return None
-            if node.data == "variable_value":
-                # Check if this is a GET operation
-                if node.children and hasattr(node.children[0], "type") and node.children[0].type == "GET":
-                    # For a GET operation, return the node itself so we can process it in get_value
-                    return node
-                # If this is a list literal, the first child is LSQB.
-                if node.children and hasattr(node.children[0], "type") and node.children[0].type == "LSQB":
-                    # Return the list_value node (child at index 1)
-                    return self.extract_literal(node.children[1])
-                else:
-                    if node.children and len(node.children) >= 1:
-                        return self.extract_literal(node.children[0])
-                    else:
-                        return None
-        if isinstance(node, list):
-            if not node:
-                return None
-            first = node[0]
-            if (isinstance(first, str) and first == "=") or (hasattr(first, "value") and first.value == "="):
-                if len(node) >= 2:
-                    return self.extract_literal(node[1])
-                else:
-                    return None
+
+        # If it's a var_init node (= value), extract the value part
+        if hasattr(node, "data") and node.data == "var_init":
+            if node.children and len(node.children) >= 2:
+                # Recursively call on the value part (node.children[1])
+                return self.extract_literal(node.children[1])
             else:
-                return self.extract_literal(first)
+                return None # Initialization without a value?
+
+        # If it's a variable_value node
+        if hasattr(node, "data") and node.data == "variable_value":
+            # If it's GET(...) or starts with LSQB ([...] or []), return this node.
+            # visit_variable_value will handle these cases correctly.
+            if node.children and hasattr(node.children[0], "type"):
+                if node.children[0].type == "GET" or node.children[0].type == "LSQB":
+                    return node
+            # Otherwise (e.g., simple expression), drill down into its child
+            if node.children and len(node.children) >= 1:
+                return self.extract_literal(node.children[0])
+            else:
+                return None # Empty variable_value?
+
+        # If it's an expression node, check for invalid access within it
+        # and return the node for get_value -> visit_expression
+        if hasattr(node, "data") and node.data == "expression":
+             self._validate_expression_for_list_access(node)
+             return node
+
+        # If it's none of the above wrappers, assume it's the node we want
+        # (e.g., a literal token, id_usage)
         return node
 
     def _validate_expression_for_list_access(self, node):
@@ -293,7 +287,14 @@ class SemanticAnalyzer(Visitor):
                         return
 
     def visit_list_value(self, node):
-        # 'items' contains the first expression and (optionally) the list_tail.
+        """Visit a list_value node, properly handling empty lists."""
+        # Check if this is an empty list (no items)
+        if not node.children:
+            # Handle empty list case
+            self.values[id(node)] = ("list", [])
+            return ("list", [])
+        
+        # Existing code for non-empty lists
         children = node.children
         result = [self.get_value(children[0])]
         if len(children) > 1:
@@ -1701,6 +1702,7 @@ class SemanticAnalyzer(Visitor):
     def visit_variable_value(self, node):
         """
         Visit a variable_value node, which can be a list, an expression, or a GET operation.
+        Enhanced to properly handle empty lists.
         """
         children = node.children
         
@@ -1716,7 +1718,15 @@ class SemanticAnalyzer(Visitor):
                 result = ("get", prompt_expr)
                 self.values[id(node)] = result
                 return result
-            
+        
+        # Handle empty list case (LSQB followed by RSQB)
+        if (len(children) >= 2 and 
+            hasattr(children[0], "type") and children[0].type == "LSQB" and
+            hasattr(children[1], "type") and children[1].type == "RSQB"):
+            result = ("list", [])
+            self.values[id(node)] = result
+            return result
+        
         # Handle other cases by recursively visiting children
         if not children:
             result = ("empty", None)

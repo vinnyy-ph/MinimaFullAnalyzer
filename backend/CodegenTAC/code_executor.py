@@ -7,10 +7,7 @@ import uuid
 import time
 import sys
 import traceback
-
-# Store execution states
 execution_states = {}
-
 def format_minima_number(value):
     """
     Format a number for output according to Minima language rules.
@@ -20,74 +17,52 @@ def format_minima_number(value):
     """
     if not isinstance(value, (int, float)):
         return value
-    
-    # Convert to integer if it's a whole number
     if isinstance(value, float) and value.is_integer():
         value = int(value)
-    
-    # Handle negative numbers with tilde
     if value < 0:
-        # Format floats with limited decimal precision
         if isinstance(value, float):
-            # Convert to string with max 9 decimal places
             formatted = f"~{abs(value):.9f}".rstrip('0').rstrip('.')
-            # Ensure there are at most 9 decimal digits
             parts = formatted.split('.')
             if len(parts) > 1 and len(parts[1]) > 9:
                 parts[1] = parts[1][:9]
                 formatted = f"~{parts[0]}.{parts[1]}"
             return formatted
         else:
-            # For integers
             return f"~{abs(value)}"
     else:
-        # Format positive floats with limited decimal precision
         if isinstance(value, float):
-            # Convert to string with max 9 decimal places
             formatted = f"{value:.9f}".rstrip('0').rstrip('.')
-            # Ensure there are at most 9 decimal digits
             parts = formatted.split('.')
             if len(parts) > 1 and len(parts[1]) > 9:
                 parts[1] = parts[1][:9]
                 formatted = f"{parts[0]}.{parts[1]}"
             return formatted
         else:
-            # For integers
             return str(value)
-
 def format_minima_output(output_text):
     """
     Ensure all negative numbers in output are displayed with tilde notation.
     This provides a second layer of formatting in case the interpreter missed anything.
     """
     import re
-    
-    # Replace minus signs with tildes in numeric output - improved regex for better precision
     def replace_negatives(match):
         number = match.group(1)
-        if '.' in number:  # It's a float
-            # Limit decimal places to 9 and format with tilde
+        if '.' in number:  
             parts = number.split('.')
             if len(parts) > 1 and len(parts[1]) > 9:
                 parts[1] = parts[1][:9]
             return f"~{parts[0]}.{parts[1]}" if len(parts) > 1 else f"~{parts[0]}"
-        else:  # It's an integer
+        else:  
             return f"~{number}"
-    
-    # This regex matches negative numbers more precisely
     formatted_text = re.sub(r'-(\d+(\.\d+)?)', replace_negatives, output_text)
-    
     return formatted_text
-
 def execute_code(code, execution_id=None, user_input=None):
     """
     Execute Minima code and return the results.
-    
     Args:
         code (str): The Minima code to execute
         execution_id (str, optional): Execution ID if resuming with input
         user_input (str, optional): User input if resuming execution
-    
     Returns:
         dict: A dictionary containing execution results and metadata
     """
@@ -102,34 +77,22 @@ def execute_code(code, execution_id=None, user_input=None):
         'executionId': None,
         'terminalOutput': ''
     }
-    
-    # If this is resuming an existing execution with input
     if execution_id and execution_id in execution_states:
         interpreter, state = execution_states.pop(execution_id)
-        
         try:
-            # Convert tilde negative notation if needed in user input
             if isinstance(user_input, str) and user_input.startswith('~'):
-                # No need to convert here, the interpreter will handle it
                 pass
-            
-            # Provide the user input and resume execution
             output = interpreter.resume_with_input(user_input)
             results['success'] = True
-            results['output'] = format_minima_output(output)  # Apply formatting
+            results['output'] = format_minima_output(output)  
             results['tac'] = interpreter.instructions
             results['formattedTAC'] = format_tac_instructions(interpreter.instructions)
-            
-            # Track terminal output
             results['terminalOutput'] = f"Execution resumed with input: {user_input}\n"
             results['terminalOutput'] += f"Steps executed: {interpreter.steps_executed}\n"
-            
         except Exception as e:
             results['error'] = f"Execution Error: {str(e)}"
             results['terminalOutput'] = f"Error when processing input: {str(e)}\n"
             results['terminalOutput'] += traceback.format_exc()
-        
-        # Check if we're waiting for more input
         if interpreter.waiting_for_input:
             new_execution_id = str(uuid.uuid4())
             execution_states[new_execution_id] = (interpreter, 'input_wait')
@@ -137,10 +100,8 @@ def execute_code(code, execution_id=None, user_input=None):
             results['inputPrompt'] = interpreter.input_prompt
             results['executionId'] = new_execution_id
             results['terminalOutput'] += f"\nWaiting for input with prompt: {interpreter.input_prompt}"
-        
         return results
     try:
-        # Lexical Analysis
         lexer = Lexer(code)
         tokens = []
         while True:
@@ -148,60 +109,32 @@ def execute_code(code, execution_id=None, user_input=None):
             if token is None:
                 break
             tokens.append(token)
-        
         if lexer.errors:
-            # Lexical errors found
             results['error'] = 'Lexical Errors: ' + ', '.join(error.message for error in lexer.errors)
             return results
-        
-        # Syntax Analysis
         success, parse_tree_or_error = analyze_syntax(code)
         if not success:
-            # Syntax errors found
             results['error'] = 'Syntax Error: ' + parse_tree_or_error['message']
             return results
-        
         parse_tree = parse_tree_or_error
-        
-        # Semantic Analysis
         semantic_analyzer = SemanticAnalyzer()
         semantic_errors = semantic_analyzer.analyze(parse_tree)
         if semantic_errors:
-            # Found semantic errors
             results['error'] = 'Semantic Errors: ' + ', '.join(error.message for error in semantic_errors)
             return results
-        
-        # Code Generation
         code_generator = TACGenerator()
         tac_instructions = code_generator.generate(parse_tree)
         results['tac'] = tac_instructions
         results['formattedTAC'] = format_tac_instructions(tac_instructions)
-        
-        # Add debug info about instructions
         results['terminalOutput'] += f"Generated {len(tac_instructions)} TAC instructions.\n"
-        
-        # Execute the TAC instructions with a timeout and step limit
         interpreter = TACInterpreter().load(tac_instructions)
-        
-        # Configure execution limits and debug mode
         max_steps = float('inf')
         interpreter.max_execution_steps = max_steps
-        
-        # Optional: Enable debug mode for troubleshooting 
-        # interpreter.debug_mode = True
-        
         try:
-            # Track execution time
             start_time = time.time()
-            
-            # Run the interpreter
             output = interpreter.run()
-            
-            # Calculate execution time
             end_time = time.time()
             execution_time = end_time - start_time
-            
-            # Check if execution was terminated due to step limit
             if interpreter.steps_executed >= max_steps:
                 results['error'] = f"Execution exceeded maximum of {max_steps} steps. Potential infinite loop detected."
                 results['terminalOutput'] += f"\n----- Execution Log -----\n"
@@ -214,42 +147,32 @@ def execute_code(code, execution_id=None, user_input=None):
                 results['terminalOutput'] += f"\n----- Execution Log -----\n"
                 results['terminalOutput'] += f"Code executed in {execution_time:.3f} seconds.\n"
                 results['terminalOutput'] += f"Execution completed after {interpreter.steps_executed} steps.\n"
-        
         except Exception as e:
             results['error'] = f"Execution Error: {str(e)}"
             results['terminalOutput'] += f"\nError during execution: {str(e)}\n"
             results['terminalOutput'] += traceback.format_exc()
-        
-        # Check if execution is waiting for input
         if interpreter.waiting_for_input:
-            # Generate a unique ID for this execution
             execution_id = str(uuid.uuid4())
-            # Store the interpreter state
             execution_states[execution_id] = (interpreter, 'input_wait')
-            # Update results to indicate waiting for input
             results['waitingForInput'] = True
             results['inputPrompt'] = interpreter.input_prompt
             results['executionId'] = execution_id
             results['success'] = True
             results['terminalOutput'] += f"Waiting for input with prompt: {interpreter.input_prompt}\n"
-        
     except Exception as e:
         results['error'] = f"Execution Error: {str(e)}"
         results['terminalOutput'] += f"Error during compilation: {str(e)}\n"
         results['terminalOutput'] += traceback.format_exc()
-    
     if 'output' in results and results['output']:
         results['output'] = format_minima_output(results['output'])    
-    
     return results
-
 def format_tac_instructions(tac_instructions):
     """Format TAC instructions for display."""
     formatted_lines = []
     for i, (op, arg1, arg2, result) in enumerate(tac_instructions):
         parts = []
         if op == 'INPUT':
-            parts.append(f"'{arg1}'")  # Format prompt as a string
+            parts.append(f"'{arg1}'")  
         elif arg1 is not None:
             parts.append(str(arg1))
         if arg2 is not None:
