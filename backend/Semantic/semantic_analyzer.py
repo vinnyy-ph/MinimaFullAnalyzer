@@ -268,6 +268,10 @@ class SemanticAnalyzer(Visitor):
                 return ("state", "NO")  
             else:
                 return ("unknown", None)
+        # Special case: string concatenation with any type
+        if op == "+" and (left[0] == "text" or right[0] == "text"):
+            # Convert both sides to string and concatenate
+            return ("text", str(left[1]) + str(right[1]))
         if left[0] == "empty" or right[0] == "empty":
             self.errors.append(SemanticError(
                 f"Operator '{op}' not supported between '{left[0]}' and '{right[0]}'", line, column))
@@ -451,7 +455,7 @@ class SemanticAnalyzer(Visitor):
                     if op == "==":
                         comparison_result = left[1] == right[1]
                     else: 
-                        comparison_result = (left[1] != right[1])
+                        comparison_result = left[1] != right[1]
                     result = ("state", "YES" if comparison_result else "NO")
                 except TypeError as e:
                     line = children[1].line if hasattr(children[1], 'line') else 0
@@ -482,15 +486,7 @@ class SemanticAnalyzer(Visitor):
                 left[0] == "parameter" or right[0] == "parameter" or
                 str(left[0]).startswith("g") or str(right[0]).startswith("g") or
                 left[1] is None or right[1] is None):
-                result = ("state", "NO")  
-            print(f"DEBUG: left type={left[0]}, right type={right[0]}")
-            if left[0] != "get" and right[0] != "get" and (str(left[0]).startswith("g") or str(right[0]).startswith("g")):
-                print(f"DEBUG: Found partial 'get' match: {left[0]}, {right[0]}")
-            if (left[0] == "unknown" or right[0] == "unknown" or 
-                left[0] == "get" or right[0] == "get" or 
-                left[0] == "parameter" or right[0] == "parameter" or
-                str(left[0]).startswith("g") or str(right[0]).startswith("g")):
-                result = ("state", "NO")  
+                result = ("state", "NO")
             elif left[1] is None or right[1] is None:
                 if left[0] != "empty" and right[0] != "empty":
                     self.errors.append(SemanticError(
@@ -1090,13 +1086,23 @@ class SemanticAnalyzer(Visitor):
             # Get the function arguments regardless of whether it's built-in or user-defined
             arg_values = self.evaluate_function_args(children[1])
             
-            # First check if it's a built-in function
             if name in self.builtin_functions:
-                # It's a built-in function - validate argument count if necessary
                 expected = self.builtin_functions[name]['params']
                 provided = len(arg_values)
                 
-                if expected != provided:
+                # Special case for variable argument functions like sorted()
+                if expected == -1:
+                    # For sorted(), valid arg count is 1 or 2
+                    if not (1 <= provided <= 2):
+                        self.errors.append(ParameterMismatchError(
+                            name, "1 to 2", provided, line, column))
+                        result = ("unknown", None)  # Set result for invalid case
+                    else:
+                        # Return the appropriate type for the built-in function - this was missing
+                        result_type = self.builtin_functions[name]['return_type']
+                        result = (result_type, None)
+                        print(f"Function call to built-in '{name}' with variable args - result type: {result_type}")
+                elif expected != provided:
                     self.errors.append(ParameterMismatchError(
                         name, expected, provided, line, column))
                     result = ("unknown", None)

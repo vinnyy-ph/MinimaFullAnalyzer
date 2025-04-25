@@ -2,13 +2,7 @@
 
 var n = integer(get("Enter a positive number: "));
 
-
-
-
 var rev = 0;
-
-
-
 
 repeat (n > 0) {
     var digit = n % 10;                  
@@ -16,8 +10,14 @@ repeat (n > 0) {
     n = integer(n / 10);          
 }
 
-
-
-
 show("Reversed number: " + text(rev));
 
+
+# var n = integer(get("Enter a positive number: "));
+
+# checkif(n > 0) {
+#     var reverse_num = reverse(text(n));
+#     show("Reversed number: " + reverse_num);
+# } otherwise {
+#     show("Please enter a positive number !");
+# }

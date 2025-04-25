@@ -8,6 +8,7 @@ import io
 import sys
 import uuid
 from contextlib import redirect_stdout
+from backend.CodegenTAC.built_in_functions import MinimaBultins
 app = Flask(__name__)
 CORS(app)
 execution_states = {}
@@ -82,5 +83,10 @@ def execute_code_route():
     if result.get('tac'):  
         result['formattedTAC'] = format_tac_instructions(result['tac'])
     return jsonify(result)
+@app.route('/api/builtin-functions', methods=['GET'])
+def get_builtin_functions():
+    """Return the list of built-in function names for the editor highlighting"""
+    builtin_functions = list(MinimaBultins.BUILTIN_FUNCTIONS.keys())
+    return jsonify(builtin_functions)
 if __name__ == '__main__':
     app.run(debug=True)

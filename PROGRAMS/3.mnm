@@ -10,7 +10,7 @@ func calculate_fib(k) {
 func print_fib_reverse(n) {
     checkif (n < 0) {
         # Stop recursion
-        throw 0; # Or similar stop keyword
+        throw empty; 
     } otherwise {
         show(calculate_fib(n) + "\n"); # Print the nth value
         print_fib_reverse(n-1); # Recurse for the next lower value

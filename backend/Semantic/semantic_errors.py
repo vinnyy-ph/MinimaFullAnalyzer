@@ -34,8 +34,11 @@ class FunctionNotDefinedError(SemanticError):
         super().__init__(message, line, column)
 
 class ParameterMismatchError(SemanticError):
-    def __init__(self, function_name, expected, got, line=None, column=None):
-        message = f"Function '{function_name}' expects {expected} argument(s) but got {got}"
+    def __init__(self, function_name, expected_count, provided_count, line, column):
+        if isinstance(expected_count, str):
+            message = f"Function '{function_name}' expects {expected_count} argument(s) but got {provided_count}"
+        else:
+            message = f"Function '{function_name}' expects {expected_count} argument(s) but got {provided_count}"
         super().__init__(message, line, column)
 
 class FunctionRedefinedError(SemanticError):

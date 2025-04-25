@@ -21,6 +21,7 @@ class TACInterpreter:
         self.max_digits = 9
         self.min_number = -999999999
         self.max_number = 999999999
+        self.input_expected_type = None  
         self.builtins = MinimaBultins.get_builtin_implementations()
     def validate_number(self, value):
         """Validate that a number is within the allowed range."""
@@ -45,6 +46,33 @@ class TACInterpreter:
             if abs(value) > float(self.max_number) + 0.999999999:
                 raise ValueError(f"Float value out of range: {value}. Valid range is ~{self.min_number}.999999999 to {self.max_number}.999999999")
         return value
+    def format_number_for_output(self, value):
+        """Format number for output according to Minima language rules."""
+        if not isinstance(value, (int, float)):
+            return value
+            
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+            
+        # Validate against range bounds
+        if isinstance(value, int):
+            if value < self.min_number or value > self.max_number:
+                raise ValueError(f"Integer out of range for output: {value}. Valid range is {self.min_number} to {self.max_number}")
+            if value < 0:
+                return f"~{abs(value)}"
+            return str(value)
+        
+        # Handle floating point values
+        if abs(value) > float(self.max_number) + 0.999999999:
+            raise ValueError(f"Float out of range for output: {value}. Valid range is ~{self.min_number}.999999999 to {self.max_number}.999999999")
+            
+        # Format with exactly 9 decimal places then trim trailing zeros
+        if value < 0:
+            formatted = f"{abs(value):.9f}".rstrip('0').rstrip('.')
+            return f"~{formatted}"
+        else:
+            formatted = f"{value:.9f}".rstrip('0').rstrip('.')
+            return formatted
     def set_execution_limit(self, limit=None):
         """
         Set the maximum execution steps limit.
@@ -215,17 +243,135 @@ class TACInterpreter:
                 self.ip += 1
         return self.output_buffer.getvalue()
     def resume_with_input(self, user_input):
-        """Resume execution after receiving user input with all inputs treated as strings."""
+        """Resume execution after receiving user input with validation for numeric inputs."""
         if not self.waiting_for_input:
             raise ValueError("Interpreter is not waiting for input")
         
-        # Always treat input as string, no automatic conversion
+        # Convert input to string for initial processing
         input_val = str(user_input)
         
+        # Check if this input is going to be typecast (set by the interpreter during execution)
+        expected_type = getattr(self, 'input_expected_type', None)
+        
+        # Validate based on expected type if typecasting is involved
+        if expected_type:
+            try:
+                if expected_type == 'integer':
+                    # Validate as integer
+                    if input_val.startswith('-'):
+                        input_val = '~' + input_val[1:]  # Convert to tilde notation
+                    
+                    # Try to parse as integer first to validate format
+                    try:
+                        numeric_value = -int(input_val[1:]) if input_val.startswith('~') else int(input_val)
+                        
+                        # Check range
+                        if numeric_value < self.min_number or numeric_value > self.max_number:
+                            raise ValueError(f"Integer input out of range: {numeric_value}. Valid range is {self.min_number} to {self.max_number}")
+                    except ValueError:
+                        # If it fails, it's not a valid integer format
+                        raise ValueError(f"Invalid integer format: '{user_input}'. Input must be a valid integer number.")
+                        
+                elif expected_type == 'point':
+                    # Validate as floating point number
+                    if input_val.startswith('-'):
+                        input_val = '~' + input_val[1:]  # Convert to tilde notation
+                    
+                    # Try to parse as float to validate format
+                    try:
+                        numeric_value = -float(input_val[1:]) if input_val.startswith('~') else float(input_val)
+                        
+                        # Check range and digits
+                        if abs(numeric_value) > float(self.max_number) + 0.999999999:
+                            raise ValueError(f"Float input out of range: {numeric_value}. Valid range is ~{self.min_number}.999999999 to {self.max_number}.999999999")
+                        
+                        str_val = str(abs(numeric_value))
+                        parts = str_val.split('.')
+                        if len(parts[0]) > self.max_digits:
+                            raise ValueError(f"Integer part has too many digits: {parts[0]}. Maximum {self.max_digits} digits allowed")
+                        
+                        if len(parts) > 1 and len(parts[1]) > self.max_digits:
+                            raise ValueError(f"Fractional part has too many digits: {parts[1]}. Maximum {self.max_digits} digits allowed")
+                    except ValueError as e:
+                        if "invalid literal" in str(e) or "could not convert" in str(e):
+                            raise ValueError(f"Invalid point format: '{user_input}'. Input must be a valid floating point number.")
+                        else:
+                            raise e
+                        
+                elif expected_type == 'state':
+                    # Validate as state (YES/NO or equivalent boolean value)
+                    upper_val = input_val.upper()
+                    if upper_val not in ['YES', 'NO', 'TRUE', 'FALSE', '0', '1']:
+                        raise ValueError(f"Invalid state value: '{user_input}'. Expected YES, NO, TRUE, FALSE, 0, or 1.")
+                    
+                    # Convert variations to standard YES/NO
+                    if upper_val in ['TRUE', '1']:
+                        input_val = 'YES'
+                    elif upper_val in ['FALSE', '0']:
+                        input_val = 'NO'
+                    else:
+                        input_val = upper_val  # Use uppercase version
+                    
+            except ValueError as e:
+                # Stop execution if validation fails
+                raise ValueError(f"Input validation error for {expected_type} type: {str(e)}")
+            
+            # Clear the expected type after processing
+            self.input_expected_type = None
+        else:
+            # If no typecast is involved, perform standard numeric validation
+            if input_val.strip().replace('.', '', 1).replace('~', '', 1).isdigit() or input_val.strip().replace('-', '', 1).replace('.', '', 1).isdigit():
+                # Handle negative numbers with minus sign by converting them
+                if input_val.startswith('-'):
+                    input_val = '~' + input_val[1:]
+                
+                try:
+                    # Try to interpret as integer first
+                    if '.' not in input_val:
+                        # Remove ~ for validation if present
+                        numeric_value = -int(input_val[1:]) if input_val.startswith('~') else int(input_val)
+                        
+                        # Check if in valid range
+                        if numeric_value < self.min_number or numeric_value > self.max_number:
+                            raise ValueError(f"Integer input out of range: {numeric_value}. Valid range is {self.min_number} to {self.max_number}")
+                        
+                        # Convert back to string using tilde notation for negative numbers
+                        if numeric_value < 0:
+                            input_val = f"~{abs(numeric_value)}"
+                    else:
+                        # Handle floating point
+                        numeric_value = -float(input_val[1:]) if input_val.startswith('~') else float(input_val)
+                        
+                        # Check if in valid range
+                        if abs(numeric_value) > float(self.max_number) + 0.999999999:
+                            raise ValueError(f"Float input out of range: {numeric_value}. Valid range is ~{self.min_number}.999999999 to {self.max_number}.999999999")
+                        
+                        # Check for too many digits in fractional part
+                        str_val = str(abs(numeric_value))
+                        parts = str_val.split('.')
+                        integer_part = parts[0]
+                        if len(integer_part) > self.max_digits:
+                            raise ValueError(f"Integer part has too many digits: {integer_part}. Maximum {self.max_digits} digits allowed")
+                        
+                        if len(parts) > 1:
+                            fractional_part = parts[1]
+                            if len(fractional_part) > self.max_digits:
+                                raise ValueError(f"Fractional part has too many digits: {fractional_part}. Maximum {self.max_digits} digits allowed")
+                        
+                        # Convert back to string using tilde notation for negative numbers
+                        if numeric_value < 0:
+                            input_val = f"~{abs(numeric_value)}"
+                except ValueError as e:
+                    # Stop execution if validation fails
+                    raise ValueError(f"Input validation error: {str(e)}")
+        
+        # Store the validated input
         self.memory[self.input_result_var] = input_val
         self.waiting_for_input = False
         self.input_prompt = ""
         self.ip += 1
+        
+        # Continue execution
         while 0 <= self.ip < len(self.instructions):
             op, arg1, arg2, result = self.instructions[self.ip]
             self.execute_instruction(op, arg1, arg2, result)
@@ -784,52 +930,61 @@ class TACInterpreter:
                         value = item[1]
                         if isinstance(value, bool):
                             value = "YES" if value else "NO"
-                        elif isinstance(value, (int, float)) and value < 0:
-                            if isinstance(value, float):
-                                decimal_str = f"{abs(value):.9f}".rstrip('0').rstrip('.')
-                                value = f"~{decimal_str}"
-                            else:
-                                value = f"~{abs(value)}"
-                        elif isinstance(value, float):
-                            value = f"{value:.9f}".rstrip('0').rstrip('.')
+                        elif isinstance(value, (int, float)):
+                            try:
+                                value = self.format_number_for_output(value)
+                            except ValueError as e:
+                                # If value is out of range, provide a trimmed representation
+                                if isinstance(value, float):
+                                    str_val = str(abs(value))
+                                    parts = str_val.split('.')
+                                    if len(parts) > 1 and len(parts[1]) > self.max_digits:
+                                        parts[1] = parts[1][:self.max_digits]
+                                    value = f"~{parts[0]}.{parts[1]}" if value < 0 else f"{parts[0]}.{parts[1]}"
+                                else:
+                                    value = f"~{abs(value)}" if value < 0 else str(value)
                         formatted_list.append(value)
                     else:
                         if isinstance(item, bool):
                             item = "YES" if item else "NO"
-                        elif isinstance(item, (int, float)) and item < 0:
-                            if isinstance(item, float):
-                                decimal_str = f"{abs(item):.9f}".rstrip('0').rstrip('.')
-                                item = f"~{decimal_str}"
-                            else:
-                                item = f"~{abs(item)}"
-                        elif isinstance(item, float):
-                            item = f"{item:.9f}".rstrip('0').rstrip('.')
+                        elif isinstance(item, (int, float)):
+                            try:
+                                item = self.format_number_for_output(item)
+                            except ValueError as e:
+                                # If value is out of range, provide a trimmed representation
+                                if isinstance(item, float):
+                                    str_val = str(abs(item))
+                                    parts = str_val.split('.')
+                                    if len(parts) > 1 and len(parts[1]) > self.max_digits:
+                                        parts[1] = parts[1][:self.max_digits]
+                                    item = f"~{parts[0]}.{parts[1]}" if item < 0 else f"{parts[0]}.{parts[1]}"
+                                else:
+                                    item = f"~{abs(item)}" if item < 0 else str(item)
                         formatted_list.append(item)
                 self.output_buffer.write(str(formatted_list))
             else:
                 if isinstance(val, bool):
                     val = "YES" if val else "NO"
-                elif isinstance(val, (int, float)) and val < 0:
-                    if isinstance(val, float):
-                        decimal_str = f"{abs(val):.9f}".rstrip('0').rstrip('.')
-                        val = f"~{decimal_str}"
-                    else:
-                        val = f"~{abs(val)}"
-                elif isinstance(val, float):
-                    val = f"{val:.9f}".rstrip('0').rstrip('.')
+                elif isinstance(val, (int, float)):
+                    try:
+                        val = self.format_number_for_output(val)
+                    except ValueError as e:
+                        # If value is out of range, provide a trimmed representation
+                        if isinstance(val, float):
+                            str_val = str(abs(val))
+                            parts = str_val.split('.')
+                            if len(parts) > 1 and len(parts[1]) > self.max_digits:
+                                parts[1] = parts[1][:self.max_digits]
+                            val = f"~{parts[0]}.{parts[1]}" if val < 0 else f"{parts[0]}.{parts[1]}"
+                        else:
+                            val = f"~{abs(val)}" if val < 0 else str(val)
+                
                 if isinstance(val, str):
                     val = val.replace('\\\\', '\\')  
                     val = val.replace('\\"', '"')    
                     val = val.replace('\\n', '\n')   
                     val = val.replace('\\t', '\t')   
                 self.output_buffer.write(str(val))
-        elif op == 'INPUT':
-            self.waiting_for_input = True
-            self.input_result_var = result
-            prompt = self.resolve_variable(arg1)
-            if not prompt:
-                prompt = ""  
-            self.input_prompt = prompt
         elif op == 'CONCAT':
             val1 = self.resolve_variable(arg1)
             val2 = self.resolve_variable(arg2)
@@ -856,6 +1011,22 @@ class TACInterpreter:
                     else:
                         str_val2 = processed
             self.memory[result] = str_val1 + str_val2
+        elif op == 'INPUT':
+            self.waiting_for_input = True
+            self.input_result_var = result
+            prompt = self.resolve_variable(arg1)
+            
+            # Check if this input is part of a typecast operation by looking ahead
+            self.input_expected_type = None  # Reset the expected type
+            if self.ip + 1 < len(self.instructions):
+                next_op, next_arg1, next_arg2, next_result = self.instructions[self.ip + 1]
+                if next_op == 'TYPECAST' and next_arg1 == result:
+                    # This input will be typecast, store the expected type
+                    self.input_expected_type = next_arg2
+            
+            if not prompt:
+                prompt = ""
+            self.input_prompt = prompt
         elif op == 'TYPECAST':
             val = self.resolve_variable(arg1)
             if arg2 == 'integer':

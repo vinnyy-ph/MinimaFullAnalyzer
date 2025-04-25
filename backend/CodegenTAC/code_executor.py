@@ -43,8 +43,11 @@ def format_minima_output(output_text):
     """
     Ensure all negative numbers in output are displayed with tilde notation.
     This provides a second layer of formatting in case the interpreter missed anything.
+    Also trims any decimal places to max 9 digits.
     """
     import re
+    
+    # First handle negative numbers with tilde
     def replace_negatives(match):
         number = match.group(1)
         if '.' in number:  
@@ -54,7 +57,21 @@ def format_minima_output(output_text):
             return f"~{parts[0]}.{parts[1]}" if len(parts) > 1 else f"~{parts[0]}"
         else:  
             return f"~{number}"
+    
+    # Apply tilde notation for negative numbers
     formatted_text = re.sub(r'-(\d+(\.\d+)?)', replace_negatives, output_text)
+    
+    # Now trim all decimal places to max 9 digits
+    def trim_decimals(match):
+        whole = match.group(1)
+        decimal = match.group(2)
+        if len(decimal) > 9:
+            decimal = decimal[:9]
+        return f"{whole}.{decimal}"
+    
+    # Apply decimal place trimming for all numbers with more than 9 decimal places
+    formatted_text = re.sub(r'((?:~)?\d+)\.(\d{10,})', trim_decimals, formatted_text)
+    
     return formatted_text
 def execute_code(code, execution_id=None, user_input=None):
     """

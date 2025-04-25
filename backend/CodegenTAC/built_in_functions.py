@@ -26,7 +26,7 @@ class MinimaBultins:
             'implementation': lambda interpreter, args: MinimaBultins._min(interpreter, args)
         },
         'sorted': {
-            'params': 1,
+            'params': -1,  # -1 indicates variable arguments (1 or 2 parameters)
             'return_type': 'list',
             'implementation': lambda interpreter, args: MinimaBultins._sorted(interpreter, args)
         },
@@ -75,6 +75,16 @@ class MinimaBultins:
             'return_type': 'text',
             'implementation': lambda interpreter, args: MinimaBultins._type(interpreter, args)
         },
+        'toString': {
+            'params': 1,
+            'return_type': 'text',
+            'implementation': lambda interpreter, args: MinimaBultins._toString(interpreter, args)
+        },
+        'toList': {
+            'params': 1,
+            'return_type': 'list',
+            'implementation': lambda interpreter, args: MinimaBultins._toList(interpreter, args)
+        },
     }
     
     @staticmethod
@@ -113,8 +123,13 @@ class MinimaBultins:
             raise ValueError("length() requires 1 argument")
         
         value = args[0]
-        if isinstance(value, (list, str)):
+        if isinstance(value, list):
             return len(value)
+        elif isinstance(value, str):
+            return len(value)
+        elif isinstance(value, (int, float)):
+            # Convert numeric values to strings to get their length
+            return len(str(value))
         else:
             raise ValueError(f"Cannot get length of non-sequence: {value}")
         
@@ -201,22 +216,41 @@ class MinimaBultins:
     @staticmethod
     def _sorted(interpreter, args):
         """
-        Minima's sorted() function - equivalent to Python's sorted()
+        Minima's sorted() function with optional direction
         Returns a sorted list from the items in the provided list or text
+        
+        sorted(collection) - sorts in ascending order
+        sorted(collection, YES/NO) - sorts in ascending (YES) or descending (NO) order
         """
-        if not args:
-            raise ValueError("sorted() requires 1 argument")
+        if not args or len(args) < 1 or len(args) > 2:
+            raise ValueError("sorted() requires 1 or 2 arguments: collection and optional direction (YES/NO)")
         
         value = args[0]
+        
+        # Default to ascending (reverse=False)
+        reverse = False
+        
+        # If second argument is provided, check for various representations of boolean values
+        if len(args) == 2:
+            direction = args[1]
+            
+            # Accept YES/NO, 1/0, and True/False as valid direction indicators
+            if direction in ["YES", True, 1]:
+                reverse = False  # Ascending
+            elif direction in ["NO", False, 0]:
+                reverse = True   # Descending
+            else:
+                raise ValueError("Second argument of sorted() must be YES/NO (or equivalent boolean/integer value)")
+        
         if isinstance(value, list):
-            # Sort the list
+            # Sort the list with the specified direction
             try:
-                return sorted(value)
+                return sorted(value, reverse=reverse)
             except TypeError:
                 raise ValueError("Cannot sort list with mixed types")
         elif isinstance(value, str):
             # Sort the characters in the string and return as a list
-            return sorted(value)
+            return sorted(value, reverse=reverse)
         else:
             raise ValueError(f"sorted() argument must be a list or text: {value}")
     
@@ -401,13 +435,16 @@ class MinimaBultins:
             raise ValueError("type() requires 1 argument")
         
         value = args[0]
-        if isinstance(value, int):
+        
+        # Special handling for state literals and their numeric equivalents
+        if value == "YES" or value == "NO" or value is True or value is False:
+            return "state"
+        # Integer 1 and 0 might be from state literals, but only identify as state if explicitly YES/NO
+        elif isinstance(value, int):
             return "integer"
         elif isinstance(value, float):
             return "point"
         elif isinstance(value, str):
-            if value in ["YES", "NO"]:
-                return "state"
             return "text"
         elif isinstance(value, list):
             return "list"
@@ -415,3 +452,30 @@ class MinimaBultins:
             return "empty"
         else:
             return "unknown"
+    @staticmethod
+    def _toString(interpreter, args):
+        """
+        Minima's toString() function
+        Converts a list to its string representation
+        """
+        if not args:
+            raise ValueError("toString() requires 1 argument")
+        
+        value = args[0]
+        return str(value)
+    
+    @staticmethod
+    def _toList(interpreter, args):
+        """
+        Minima's toList() function
+        Converts a string to a list of characters
+        """
+        if not args:
+            raise ValueError("toList() requires 1 argument")
+        
+        value = args[0]
+        if isinstance(value, str):
+            return list(value)
+        else:
+            # Convert to string first, then to list
+            return list(str(value))

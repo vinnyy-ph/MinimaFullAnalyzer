@@ -1,19 +1,13 @@
 var i;
 var n = integer(get("Enter a positive integer: "));
-
-
-
-
 var fact = 1;
 
-
-
-
-each (i = 1; i <= n; i++) {
+checkif(n > 0) {
+    each (i = 1; i <= n; i++) {
     fact *= i;
+    }
+
+    show("Factorial of " + text(n) + " is " + text(fact));
+} otherwise {
+    show("Please enter a postive integer");
 }
-
-
-
-
-show("Factorial of " + text(n) + " is " + text(fact));
