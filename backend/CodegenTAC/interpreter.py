@@ -453,6 +453,24 @@ class TACInterpreter:
                 list_var.append(extension)
             if result is not None:
                 self.memory[result] = list_var
+        elif op == 'LIST_SET':
+            list_var = self.resolve_variable(arg1)
+            index = self.resolve_variable(arg2)
+            value = self.resolve_variable(result)
+            
+            if isinstance(list_var, list):
+                if isinstance(index, int) and 0 <= index < len(list_var):
+                    list_var[index] = value
+                elif isinstance(index, int) and index >= len(list_var):
+                    # Extend the list if needed
+                    while len(list_var) <= index:
+                        list_var.append(None)
+                    list_var[index] = value
+                else:
+                    # Handle invalid index
+                    raise ValueError(f"Invalid list index: {index}")
+            else:
+                raise ValueError(f"Cannot assign to index of non-list: {arg1}")
         elif op == 'SUB':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
@@ -832,6 +850,23 @@ class TACInterpreter:
                     raise ValueError(f"Key {key} not found in group {arg1}")
             else:
                 raise ValueError(f"Cannot access key in non-group: {arg1}")
+        elif op == 'GROUP_CREATE':
+            self.memory[result] = {}
+            if self.debug_mode:
+                print(f"Created empty group: {result}")
+        elif op == 'GROUP_SET':
+            group = self.resolve_variable(arg1)
+            key = self.resolve_variable(arg2)
+            value = self.resolve_variable(result)
+            
+            if not isinstance(group, dict):
+                group = {}
+                self.memory[arg1] = group
+            
+            group[key] = value
+            
+            if self.debug_mode:
+                print(f"Set group {arg1}[{key}] = {value}")
         elif op == 'ERROR':
             raise ValueError(f"Runtime error: {arg1}")
         if self.debug_mode and op in ('ASSIGN', 'ADD', 'SUB', 'MUL', 'DIV'):

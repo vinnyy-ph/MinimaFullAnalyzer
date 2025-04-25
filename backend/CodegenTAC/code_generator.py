@@ -621,6 +621,7 @@ class TACGenerator(Visitor):
             self.emit('GROUP_ACCESS', var_name, index_expr, temp)
         return temp
     def visit_var_assign(self, node):
+        """Handle variable assignments, including group assignments."""
         children = node.children
         var_name = children[0].value
         has_accessor = False
@@ -629,13 +630,20 @@ class TACGenerator(Visitor):
             has_accessor = True
             accessor_node = children[1]
             accessor_node.parent = node
-            self.visit(accessor_node)
+            if not hasattr(accessor_node, 'children') or len(accessor_node.children) < 2:
+                print(f"WARNING: accessor_node for {var_name} doesn't have enough children")
+                has_accessor = False
         if has_accessor:
             assign_op_idx = 2
             expr_idx = 3
+            index_expr = self.visit(accessor_node.children[1])
+            is_list_access = accessor_node.children[0].type == "LSQB"
         else:
             assign_op_idx = 1
             expr_idx = 2
+        if assign_op_idx >= len(children) or expr_idx >= len(children):
+            print(f"WARNING: Invalid AST structure for variable assignment to {var_name}")
+            return None
         assign_op_node = children[assign_op_idx]
         if hasattr(assign_op_node, 'data'):
             op = assign_op_node.children[0].value
@@ -645,60 +653,81 @@ class TACGenerator(Visitor):
         expr_val = self.visit(expr_node)
         if isinstance(expr_val, tuple) and len(expr_val) >= 2:
             self.variable_types[var_name] = expr_val[0]
-        if op == '=':
-            if isinstance(expr_val, tuple):
-                if expr_val[0] == 'text':
-                    self.emit('ASSIGN', expr_val[1], None, var_name)
-                else:
-                    self.emit('ASSIGN', expr_val[1], None, var_name)
-            else:
-                self.emit('ASSIGN', expr_val, None, var_name)
-        else:
-            temp = self.get_temp()
-            self.emit('ASSIGN', var_name, None, temp)
-            rhs = expr_val[1] if isinstance(expr_val, tuple) else expr_val
-            result_temp = self.get_temp()
-            var_type = self.get_type(var_name)
-            expr_type = expr_val[0] if isinstance(expr_val, tuple) else self.get_type(expr_val)
-            if op == '+=':
-                if var_type == "text" or expr_type == "text":
-                    self.emit('CONCAT', temp, rhs, result_temp)
-                    self.variable_types[result_temp] = "text"
-                else:
-                    self.emit('ADD', temp, rhs, result_temp)
-                    if var_type == "point" or expr_type == "point" or var_type == "float" or expr_type == "float":
-                        self.variable_types[result_temp] = "point"
+        if has_accessor:
+            if op == '=':
+                if is_list_access:
+                    if isinstance(expr_val, tuple) and len(expr_val) >= 2:
+                        self.emit('LIST_SET', var_name, index_expr, expr_val[1])
                     else:
-                        self.variable_types[result_temp] = "integer"
-            elif op == '-=':
-                if var_type == "text" or expr_type == "text":
-                    self.emit('ERROR', "Cannot subtract from text", None, result_temp)
+                        self.emit('LIST_SET', var_name, index_expr, expr_val)
                 else:
+                    if isinstance(expr_val, tuple) and len(expr_val) >= 2:
+                        self.emit('GROUP_SET', var_name, index_expr, expr_val[1])
+                    else:
+                        self.emit('GROUP_SET', var_name, index_expr, expr_val)
+            else:
+                temp = self.get_temp()
+                if is_list_access:
+                    self.emit('LIST_ACCESS', var_name, index_expr, temp)
+                else:
+                    self.emit('GROUP_ACCESS', var_name, index_expr, temp)
+                rhs = expr_val[1] if isinstance(expr_val, tuple) and len(expr_val) >= 2 else expr_val
+                result_temp = self.get_temp()
+                if op == '+=':
+                    self.emit('ADD', temp, rhs, result_temp)
+                elif op == '-=':
+                    self.emit('SUB', temp, rhs, result_temp)
+                elif op == '*=':
+                    self.emit('MUL', temp, rhs, result_temp)
+                elif op == '/=':
+                    self.emit('DIV', temp, rhs, result_temp)
+                if is_list_access:
+                    self.emit('LIST_SET', var_name, index_expr, result_temp)
+                else:
+                    self.emit('GROUP_SET', var_name, index_expr, result_temp)
+        else:
+            if op == '=':
+                if isinstance(expr_val, tuple):
+                    self.emit('ASSIGN', expr_val[1], None, var_name)
+                else:
+                    self.emit('ASSIGN', expr_val, None, var_name)
+            else:
+                temp = self.get_temp()
+                self.emit('ASSIGN', var_name, None, temp)
+                rhs = expr_val[1] if isinstance(expr_val, tuple) and len(expr_val) >= 2 else expr_val
+                result_temp = self.get_temp()
+                var_type = self.get_type(var_name)
+                expr_type = expr_val[0] if isinstance(expr_val, tuple) and len(expr_val) >= 2 else self.get_type(expr_val)
+                if op == '+=':
+                    if var_type == "list" and expr_type == "list":
+                        self.emit('LIST_EXTEND', temp, rhs, result_temp)
+                    elif var_type == "text" or expr_type == "text":
+                        self.emit('CONCAT', temp, rhs, result_temp)
+                        self.variable_types[result_temp] = "text"
+                    else:
+                        self.emit('ADD', temp, rhs, result_temp)
+                        if var_type == "point" or expr_type == "point" or var_type == "float" or expr_type == "float":
+                            self.variable_types[result_temp] = "point"
+                        else:
+                            self.variable_types[result_temp] = "integer"
+                elif op == '-=':
                     self.emit('SUB', temp, rhs, result_temp)
                     if var_type == "point" or expr_type == "point" or var_type == "float" or expr_type == "float":
                         self.variable_types[result_temp] = "point"
                     else:
                         self.variable_types[result_temp] = "integer"
-            elif op == '*=':
-                if var_type == "text" or expr_type == "text":
-                    self.emit('ERROR', "Cannot multiply text", None, result_temp)
-                else:
+                elif op == '*=':
                     self.emit('MUL', temp, rhs, result_temp)
                     if var_type == "point" or expr_type == "point" or var_type == "float" or expr_type == "float":
                         self.variable_types[result_temp] = "point"
                     else:
                         self.variable_types[result_temp] = "integer"
-            elif op == '/=':
-                if var_type == "text" or expr_type == "text":
-                    self.emit('ERROR', "Cannot divide text", None, result_temp)
-                else:
+                elif op == '/=':
                     self.emit('DIV', temp, rhs, result_temp)
                     self.variable_types[result_temp] = "point"
-            else:
-                self.emit('ASSIGN', rhs, None, result_temp)
-            self.emit('ASSIGN', result_temp, None, var_name)
-            if result_temp in self.variable_types:
-                self.variable_types[var_name] = self.variable_types[result_temp]
+                self.emit('ASSIGN', result_temp, None, var_name)
+                if result_temp in self.variable_types:
+                    self.variable_types[var_name] = self.variable_types[result_temp]
         return None
     def visit_show_statement(self, node):
         """
@@ -1085,20 +1114,24 @@ class TACGenerator(Visitor):
         """
         end_label = self.get_label()
         switch_expr = self.visit(node.children[2])
+        # Extract the actual value if it's a tuple
+        switch_expr_val = switch_expr[1] if isinstance(switch_expr, tuple) and len(switch_expr) >= 2 else switch_expr
+        
         case_value = self.visit(node.children[6])
         comp_temp = self.get_temp()
-        self.emit('EQ', switch_expr, case_value[1] if isinstance(case_value, tuple) else case_value, comp_temp)
+        self.emit('EQ', switch_expr_val, case_value[1] if isinstance(case_value, tuple) else case_value, comp_temp)
         next_case_label = self.get_label()
         self.emit('IFFALSE', comp_temp, None, next_case_label)
         self.visit(node.children[8])
         self.emit('GOTO', None, None, end_label)
         self.emit('LABEL', None, None, next_case_label)
         if len(node.children) > 9 and node.children[9]:
-            self.visit_case_tail(node.children[9], switch_expr, end_label)
+            self.visit_case_tail(node.children[9], switch_expr_val, end_label)
         if len(node.children) > 10 and node.children[10]:
             self.visit(node.children[10])
         self.emit('LABEL', None, None, end_label)
         return None
+    
     def visit_case_tail(self, node, switch_expr, end_label):
         """
         Generate TAC for additional cases in a switch statement.
@@ -1200,4 +1233,160 @@ class TACGenerator(Visitor):
         if not node or not hasattr(node, 'children') or len(node.children) < 3:
             return None
         self.visit(node.children[2])  
+        return None
+    def visit_group_declaration(self, node):
+        """Handle group declarations."""
+        group_name = node.children[1].value
+        self.emit('GROUP_CREATE', None, None, group_name)
+        self.variable_types[group_name] = "group"
+        if len(node.children) > 3 and hasattr(node.children[3], 'data') and node.children[3].data == 'group_members':
+            self.visit_group_members(node.children[3], group_name)
+        return None
+    def visit_group_members(self, node, group_name):
+        """Handle group members (key-value pairs)."""
+        key_expr = self.visit(node.children[0])
+        value_expr = self.visit(node.children[2])
+        key = key_expr[1] if isinstance(key_expr, tuple) and len(key_expr) >= 2 else key_expr
+        value = value_expr[1] if isinstance(value_expr, tuple) and len(value_expr) >= 2 else value_expr
+        self.emit('GROUP_SET', group_name, key, value)
+        if len(node.children) > 3 and node.children[3]:
+            self.visit_member_tail(node.children[3], group_name)
+        return None
+    def visit_member_tail(self, node, group_name):
+        """Handle additional members in a group declaration."""
+        if not node or not hasattr(node, 'children') or len(node.children) < 2:
+            return None
+        if hasattr(node.children[1], 'data') and node.children[1].data == 'group_members':
+            self.visit_group_members(node.children[1], group_name)
+        return None
+    def visit_fixed_declaration(self, node):
+        """Handle fixed variable declarations."""
+        var_name = node.children[1].value
+        value_expr = self.visit(node.children[3])
+        if isinstance(value_expr, tuple) and len(value_expr) >= 2:
+            self.emit('ASSIGN', value_expr[1], None, var_name)
+            self.variable_types[var_name] = value_expr[0]
+        else:
+            self.emit('ASSIGN', value_expr, None, var_name)
+        if len(node.children) > 4 and node.children[4]:
+            self.visit_fixed_tail(node.children[4])
+        return None
+    def visit_fixed_tail(self, node):
+        """Handle additional fixed variable declarations."""
+        if not node or not hasattr(node, 'children') or len(node.children) < 4:
+            return None
+        var_name = node.children[1].value
+        value_expr = self.visit(node.children[3])
+        if isinstance(value_expr, tuple) and len(value_expr) >= 2:
+            self.emit('ASSIGN', value_expr[1], None, var_name)
+            self.variable_types[var_name] = value_expr[0]
+        else:
+            self.emit('ASSIGN', value_expr, None, var_name)
+        if len(node.children) > 4 and node.children[4]:
+            self.visit_fixed_tail(node.children[4])
+        return None
+    def visit_loop_switch_statement(self, node):
+        """Generate TAC for switch statements in loops."""
+        end_label = self.get_label()
+        switch_expr = self.visit(node.children[2])
+        case_value = self.visit(node.children[6])
+        comp_temp = self.get_temp()
+        self.emit('EQ', switch_expr, case_value[1] if isinstance(case_value, tuple) else case_value, comp_temp)
+        next_case_label = self.get_label()
+        self.emit('IFFALSE', comp_temp, None, next_case_label)
+        self.visit(node.children[8])
+        self.emit('GOTO', None, None, end_label)
+        self.emit('LABEL', None, None, next_case_label)
+        if len(node.children) > 9 and node.children[9]:
+            self.visit_case_tail_loop(node.children[9], switch_expr, end_label)
+        if len(node.children) > 10 and node.children[10]:
+            self.visit(node.children[10])
+        self.emit('LABEL', None, None, end_label)
+        return None
+    def visit_case_tail_loop(self, node, switch_expr, end_label):
+        """Generate TAC for additional cases in a loop switch statement."""
+        if not node or not hasattr(node, 'children') or len(node.children) < 4:
+            return None
+        case_value = self.visit(node.children[1])
+        comp_temp = self.get_temp()
+        self.emit('EQ', switch_expr, case_value[1] if isinstance(case_value, tuple) else case_value, comp_temp)
+        next_case_label = self.get_label()
+        self.emit('IFFALSE', comp_temp, None, next_case_label)
+        self.visit(node.children[3])
+        self.emit('GOTO', None, None, end_label)
+        self.emit('LABEL', None, None, next_case_label)
+        if len(node.children) > 4 and node.children[4]:
+            self.visit_case_tail_loop(node.children[4], switch_expr, end_label)
+        return None
+    def visit_func_switch_statement(self, node):
+        """Generate TAC for switch statements in functions."""
+        end_label = self.get_label()
+        switch_expr = self.visit(node.children[2])
+        case_value = self.visit(node.children[6])
+        comp_temp = self.get_temp()
+        self.emit('EQ', switch_expr, case_value[1] if isinstance(case_value, tuple) else case_value, comp_temp)
+        next_case_label = self.get_label()
+        self.emit('IFFALSE', comp_temp, None, next_case_label)
+        self.visit(node.children[8])
+        self.emit('GOTO', None, None, end_label)
+        self.emit('LABEL', None, None, next_case_label)
+        if len(node.children) > 9 and node.children[9]:
+            self.visit_func_case_tail(node.children[9], switch_expr, end_label)
+        if len(node.children) > 10 and node.children[10]:
+            self.visit(node.children[10])
+        self.emit('LABEL', None, None, end_label)
+        return None
+    def visit_func_case_tail(self, node, switch_expr, end_label):
+        """Generate TAC for additional cases in a function switch statement."""
+        if not node or not hasattr(node, 'children') or len(node.children) < 4:
+            return None
+        case_value = self.visit(node.children[1])
+        comp_temp = self.get_temp()
+        self.emit('EQ', switch_expr, case_value[1] if isinstance(case_value, tuple) else case_value, comp_temp)
+        next_case_label = self.get_label()
+        self.emit('IFFALSE', comp_temp, None, next_case_label)
+        self.visit(node.children[3])
+        self.emit('GOTO', None, None, end_label)
+        self.emit('LABEL', None, None, next_case_label)
+        if len(node.children) > 4 and node.children[4]:
+            self.visit_func_case_tail(node.children[4], switch_expr, end_label)
+        return None
+    def visit_func_loop_switch_statement(self, node):
+        """Generate TAC for switch statements in function loops."""
+        end_label = self.get_label()
+        switch_expr = self.visit(node.children[2])
+        case_value = self.visit(node.children[6])
+        comp_temp = self.get_temp()
+        self.emit('EQ', switch_expr, case_value[1] if isinstance(case_value, tuple) else case_value, comp_temp)
+        next_case_label = self.get_label()
+        self.emit('IFFALSE', comp_temp, None, next_case_label)
+        self.visit(node.children[8])
+        self.emit('GOTO', None, None, end_label)
+        self.emit('LABEL', None, None, next_case_label)
+        if len(node.children) > 9 and node.children[9]:
+            self.visit_func_loop_case_tail(node.children[9], switch_expr, end_label)
+        if len(node.children) > 10 and node.children[10]:
+            self.visit(node.children[10])
+        self.emit('LABEL', None, None, end_label)
+        return None
+    def visit_func_loop_case_tail(self, node, switch_expr, end_label):
+        """Generate TAC for additional cases in a function loop switch statement."""
+        if not node or not hasattr(node, 'children') or len(node.children) < 4:
+            return None
+        case_value = self.visit(node.children[1])
+        comp_temp = self.get_temp()
+        self.emit('EQ', switch_expr, case_value[1] if isinstance(case_value, tuple) else case_value, comp_temp)
+        next_case_label = self.get_label()
+        self.emit('IFFALSE', comp_temp, None, next_case_label)
+        self.visit(node.children[3])
+        self.emit('GOTO', None, None, end_label)
+        self.emit('LABEL', None, None, next_case_label)
+        if len(node.children) > 4 and node.children[4]:
+            self.visit_func_loop_case_tail(node.children[4], switch_expr, end_label)
+        return None
+    def visit_func_loop_block(self, node):
+        """Visit a block of statements in a function loop."""
+        for child in node.children:
+            if hasattr(child, 'data') or hasattr(child, 'type'):
+                self.visit(child)
         return None

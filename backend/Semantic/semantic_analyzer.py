@@ -1,22 +1,7 @@
 import re
 from lark import Visitor
 from .symbol_table import SymbolTable
-from .semantic_errors import (
-    InvalidListOperandError,
-    ListIndexOutOfRangeError,
-    SemanticError,
-    FunctionRedefinedError,
-    ParameterMismatchError,
-    FunctionNotDefinedError,
-    UndefinedIdentifierError,
-    RedeclarationError,
-    FixedVarReassignmentError,
-    ControlFlowError,
-    TypeMismatchError,
-    UnreachableCodeError,
-    InvalidListAccessError,
-    InvalidGroupAccessError
-)
+from .semantic_errors import InvalidListOperandError, ListIndexOutOfRangeError, SemanticError, FunctionRedefinedError, ParameterMismatchError, FunctionNotDefinedError, UndefinedIdentifierError, RedeclarationError, FixedVarReassignmentError, ControlFlowError, TypeMismatchError, UnreachableCodeError, InvalidListAccessError, InvalidGroupAccessError
 def convert_state_to_int(state):
     return 1 if state == "YES" else 0
 def convert_state_to_point(state):
@@ -994,35 +979,48 @@ class SemanticAnalyzer(Visitor):
                     if index_expr[0] == "integer":
                         index = index_expr[1]
                         list_value = var_value[1]  
-                        if index < 0 or index >= len(list_value):
+                        # MODIFIED: Be more permissive about list index validation
+                        # Allow reasonable indices even if the list is currently empty
+                        if index < 0 or index > 100:  # Only warn about very large negative indices or unreasonably large ones
                             line = getattr(index_expr_node, 'line', 0)
                             column = getattr(index_expr_node, 'column', 0)
-                            self.errors.append(ListIndexOutOfRangeError(
-                                name, index, line, column))
-                        else:
+                            self.errors.append(SemanticError(
+                                f"Warning: List index {index} may be out of range for variable '{name}'",
+                                line, column))
+                        
+                        # For accessing/modifying the list element
+                        current_element = ("unknown", None)
+                        if 0 <= index < len(list_value):
                             current_element = list_value[index]
-                            if op == "=":
-                                new_element_value = expr_value
+                        
+                        # Always proceed with assignment regardless of current list size
+                        if op == "=":
+                            new_element_value = expr_value
+                        else:
+                            if current_element[0] not in ["integer", "point", "text"]:
+                                self.errors.append(SemanticError(
+                                    f"Operator '{op}' not applicable to element of type '{current_element[0]}'", 
+                                    assign_op_node.line if hasattr(assign_op_node, 'line') else 0,
+                                    assign_op_node.column if hasattr(assign_op_node, 'column') else 0))
+                                return
+                            if op == "+=":
+                                new_element_value = self.evaluate_binary("+", current_element, expr_value)
+                            elif op == "-=":
+                                new_element_value = self.evaluate_binary("-", current_element, expr_value)
+                            elif op == "*=":
+                                new_element_value = self.evaluate_binary("*", current_element, expr_value)
+                            elif op == "/=":
+                                new_element_value = self.evaluate_binary("/", current_element, expr_value)
                             else:
-                                if current_element[0] not in ["integer", "point", "text"]:
-                                    self.errors.append(SemanticError(
-                                        f"Operator '{op}' not applicable to element of type '{current_element[0]}'", 
-                                        assign_op_node.line if hasattr(assign_op_node, 'line') else 0,
-                                        assign_op_node.column if hasattr(assign_op_node, 'column') else 0))
-                                    return
-                                if op == "+=":
-                                    new_element_value = self.evaluate_binary("+", current_element, expr_value)
-                                elif op == "-=":
-                                    new_element_value = self.evaluate_binary("-", current_element, expr_value)
-                                elif op == "*=":
-                                    new_element_value = self.evaluate_binary("*", current_element, expr_value)
-                                elif op == "/=":
-                                    new_element_value = self.evaluate_binary("/", current_element, expr_value)
-                                else:
-                                    new_element_value = expr_value  
-                            list_value[index] = new_element_value
-                            scope.variables[name].value =("list", list_value)
-                            print(f"List element at index {index} reassigned to {new_element_value[1]} {new_element_value[0]}")
+                                new_element_value = expr_value  
+                        
+                        # Make sure the list has enough space
+                        while len(list_value) <= index:
+                            list_value.append(("unknown", None))
+                            
+                        list_value[index] = new_element_value
+                        scope.variables[name].value = ("list", list_value)
+                        print(f"List element at index {index} reassigned to {new_element_value[1]} {new_element_value[0]}")
                 elif var_type == "group":
                     key_expr_node = accessor_node.children[1]
                     key_expr = self.get_value(key_expr_node)
@@ -1543,12 +1541,20 @@ class SemanticAnalyzer(Visitor):
                             list_items = var_value[1]
                             if key_value[0] == "integer":
                                 idx = key_value[1]
-                                if idx < 0: idx = len(list_items) + idx 
+                                
+                                # MODIFIED: Allow accessing list elements that might be dynamically created
+                                # Only warn about out-of-range accesses for larger indices that are likely errors
+                                # This allows accessing indexes 0, 1, etc. even if the list is initially empty
+                                if idx < 0 or idx > 100:  # Allow reasonable indices, protect against very large ones
+                                    self.errors.append(SemanticError(
+                                        f"Warning: List index {key_value[1]} may be out of range for variable '{var_name}'",
+                                        line, column))
+                                
+                                # Return a result of unknown type to allow the code to proceed
                                 if 0 <= idx < len(list_items):
-                                    result = list_items[idx] 
+                                    result = list_items[idx]
                                 else:
-                                    self.errors.append(ListIndexOutOfRangeError(
-                                        var_name, key_value[1], line, column))
+                                    print(f"Permitting potential runtime list access to '{var_name}[{idx}]'")
                                     result = ("unknown", None)
                             else:
                                 self.errors.append(SemanticError(
