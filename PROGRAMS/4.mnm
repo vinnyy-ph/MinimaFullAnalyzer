@@ -1,23 +1,44 @@
-# Main program to generate permutations
-var input_str = text(get("Enter a string: "));  # Get user input
+var i, input_string;
+var permutations;
 
-# Initialize variables for each character
-var a = input_str[0];  # First character
-var b = input_str[1];  # Second character
-var c = input_str[2];  # Third character
+input_string = text(get("Enter a string:"));
 
-# Manually calculate the length of the string without using functions
-var length = 3;  # We know the string length is 3
+# Helper function to calculate the length of a string
 
-# Generate permutations using loops (no function calls)
-each (var i = 0; i < length; i++) {
-    each (var j = 0; j < length; j++) {
-        each (var k = 0; k < length; k++) {
-            checkif (i != j && j != k && i != k) {  # Make sure all indices are unique
-                # Print permutation
-                show(input_str[i] + input_str[j] + input_str[k]);
-                show(" ");  # Space between permutations
-            }
-        }
-    }
+func stringLength(str) {
+  var length = 0;
+  each(i = 0; str[i] != empty; i++) {
+    length = i + 1;
+  }
+  throw length;
 }
+# Function to calculate permutations of a string
+
+func permute(str, l, r) {
+  checkif (l == r) {
+    show(str + " ");
+  } otherwise {
+    each(i = l; i <= r; i++) {
+      # Swap characters at positions l and i
+      var temp = str[l];
+      str[l] = str[i];
+      str[i] = temp;
+      permute(str, l + 1, r);
+      # Backtrack (swap characters back)
+      temp = str[l];
+      str[l] = str[i];
+      str[i] = temp;
+    }
+  }
+}
+
+# Convert input string to a list
+var str_list = [];
+var str_length = stringLength(input_string); # Get the string length
+each(i = 0; i < str_length; i++) {
+  str_list += [input_string[i]];
+
+}
+
+# Call the permute function to generate and print permutations
+permute(str_list, 0, str_length - 1);
