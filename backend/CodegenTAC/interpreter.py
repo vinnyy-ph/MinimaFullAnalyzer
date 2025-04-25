@@ -40,9 +40,9 @@ class TACInterpreter:
         # Check range for integers
         if isinstance(value, int):
             if value < self.min_number or value > self.max_number:
-                raise ValueError(f"Number out of range: {value}. Valid range is ~999999999 to {self.max_number}")
+                raise ValueError(f"Number out of range: {value}. Valid range is {self.min_number} to {self.max_number}")
         
-        # Handle digit limits for floats
+        # Check digit limits for floats
         elif isinstance(value, float):
             # Convert to string to check digits
             str_val = str(abs(value))
@@ -53,15 +53,11 @@ class TACInterpreter:
             if len(integer_part) > self.max_digits:
                 raise ValueError(f"Number has too many digits in integer part: {value}. Maximum {self.max_digits} digits allowed")
             
-            # Truncate fractional part if it exceeds max digits
+            # Check fractional part (right of decimal) if present
             if len(parts) > 1:
                 fractional_part = parts[1]
                 if len(fractional_part) > self.max_digits:
-                    # Truncate to max_digits instead of raising error
-                    truncated_fractional = fractional_part[:self.max_digits]
-                    # Recreate the number with the truncated fractional part
-                    sign = -1 if value < 0 else 1
-                    value = sign * float(f"{integer_part}.{truncated_fractional}")
+                    raise ValueError(f"Number has too many digits in fractional part: {value}. Maximum {self.max_digits} digits allowed")
             
             # Also check absolute magnitude isn't too large
             if abs(value) > float(self.max_number) + 0.999999999:
@@ -80,24 +76,24 @@ class TACInterpreter:
         """Helper to resolve a variable to its value, handling parameter names properly."""
         if val is None:
             return None
-
+        
         # Special handling for 'empty' keyword
         if val == 'empty':
             return None
-
+        
         # Direct memory lookup for strings (most common case)
         if isinstance(val, str) and val in self.memory:
             return self.memory[val]
-
+        
         # For numeric literals (integers, floats)
         if isinstance(val, (int, float)):
             return val
-
+            
         # For string literals (already resolved)
         if isinstance(val, str) and (val.startswith('"') and val.endswith('"')):
             # Remove quotes
             inner_str = val[1:-1]
-
+            
             # Process escape sequences properly
             result = ""
             i = 0
@@ -118,27 +114,26 @@ class TACInterpreter:
                 else:
                     result += inner_str[i]
                     i += 1
-
+            
             return result
-
+        
         # Special handling for temporary variables not found in memory
         if isinstance(val, str) and val.startswith('t') and val[1:].isdigit():
-            # Removed debug print for missing temps to avoid clutter
-            # if self.debug_mode:
-            #     print(f"Warning: Temporary variable {val} not found in memory, using False")
-            return False # Return False for missing temps
-
-        # Try numeric conversion for string literals, *unless* it starts with ~
-        if isinstance(val, str) and not val.startswith('~'): # <-- Added check for ~
+            if self.debug_mode:
+                print(f"Warning: Temporary variable {val} not found in memory, using False")
+            return False  # Return False for missing temps to prevent infinite loops
+        
+        # Try numeric conversion for string literals
+        if isinstance(val, str):
             try:
-                 return int(val)
+                return int(val) 
             except ValueError:
                 try:
                     return float(val)
                 except ValueError:
-                    pass # If conversion fails, return the original string below
-
-        # Return the original value if no resolution needed or if it's a '~' string
+                    pass
+        
+        # Return the original value if no resolution needed
         return val
 
     def reset(self):
@@ -282,58 +277,48 @@ class TACInterpreter:
         return self.output_buffer.getvalue()
     
     def resume_with_input(self, user_input):
-        """Resume execution after receiving user input, always treating it as a string."""
+        """Resume execution after receiving user input with number validation."""
         if not self.waiting_for_input:
             raise ValueError("Interpreter is not waiting for input")
-
-        # Always store the input as a string without any type conversion
-        # This matches Python's input() function behavior
-        input_val = user_input # user_input is expected to be a string
-
-        # Store the input
-        if self.input_result_var:
-             self.memory[self.input_result_var] = input_val
-             if self.debug_mode:
-                 print(f"Stored input '{input_val}' into variable '{self.input_result_var}'")
-        else:
-             if self.debug_mode:
-                 print(f"Warning: No result variable specified for INPUT instruction.")
-
-
+        
+        # Try to convert input to number if possible
+        try:
+            # Check if it's an integer
+            input_val = int(user_input)
+            # Validate the number
+            input_val = self.validate_number(input_val)
+        except ValueError:
+            try:
+                # Try float if integer conversion failed
+                input_val = float(user_input)
+                # Validate the number
+                input_val = self.validate_number(input_val)
+            except ValueError:
+                # If not a valid number, keep as string
+                input_val = user_input
+        
+        # Store the validated input
+        self.memory[self.input_result_var] = input_val
+        
         # Reset input-waiting state
         self.waiting_for_input = False
         self.input_prompt = ""
-        self.input_result_var = None # Clear the result var after use
-
+        
         # Continue execution from next instruction
         self.ip += 1
-
+        
         # Continue running until completion or next input request
         while 0 <= self.ip < len(self.instructions):
-            # Check execution step limit
-            if self.max_execution_steps is not None and self.steps_executed >= self.max_execution_steps:
-                raise RuntimeError(f"Execution exceeded maximum steps ({self.max_execution_steps})")
-
             op, arg1, arg2, result = self.instructions[self.ip]
-
-            # Debug print current instruction
-            if self.debug_mode:
-                 print(f"Resuming at IP={self.ip}: {op}, {arg1}, {arg2}, {result}")
-
             self.execute_instruction(op, arg1, arg2, result)
-            self.steps_executed += 1
-
+            
             # If we're waiting for input again, pause execution
             if self.waiting_for_input:
-                if self.debug_mode:
-                    print(f"Pausing again for input at IP={self.ip}")
-                break # Pause execution
-
-            # Advance IP only if not a jump/call/return instruction
+                break
+                
             if op not in ('GOTO', 'IFFALSE', 'IFTRUE', 'RETURN', 'CALL'):
                 self.ip += 1
-            # If it was a jump/call/return, self.ip was already updated inside execute_instruction
-
+        
         return self.output_buffer.getvalue()
 
     def execute_instruction(self, op, arg1, arg2, result):
@@ -517,45 +502,86 @@ class TACInterpreter:
         elif op == 'ADD':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
-
-            # Check for list concatenation first
-            if isinstance(left_val, list) or isinstance(right_val, list):
-                # Ensure both are lists (or treat non-list as single-element list)
-                list1 = left_val if isinstance(left_val, list) else [left_val]
-                list2 = right_val if isinstance(right_val, list) else [right_val]
-                # Resolve items within the lists if they are variable names or tuples
-                resolved_list1 = [self.resolve_variable(item[1] if isinstance(item, tuple) and item[0]=='id' else item) for item in list1]
-                resolved_list2 = [self.resolve_variable(item[1] if isinstance(item, tuple) and item[0]=='id' else item) for item in list2]
-                self.memory[result] = resolved_list1 + resolved_list2
-                if self.debug_mode:
-                     print(f"List ADD: {resolved_list1} + {resolved_list2} -> {self.memory[result]}")
-
-            # Check if either operand is a string -> Perform string concatenation
-            elif isinstance(left_val, str) or isinstance(right_val, str):
-                # Convert both to string, handling None and booleans
-                str_left = "" if left_val is None else ("YES" if isinstance(left_val, bool) and left_val else ("NO" if isinstance(left_val, bool) and not left_val else str(left_val)))
-                str_right = "" if right_val is None else ("YES" if isinstance(right_val, bool) and right_val else ("NO" if isinstance(right_val, bool) and not right_val else str(right_val)))
-                self.memory[result] = str_left + str_right
-                if self.debug_mode:
-                    print(f"String ADD (Concat): {str_left} + {str_right} -> {self.memory[result]}")
             
-            # Otherwise, attempt numeric addition
+            # Handle list concatenation (new functionality)
+            if isinstance(left_val, list):
+                if isinstance(right_val, list):
+                    # Special handling for lists - resolve each item properly
+                    resolved_right = []
+                    for item in right_val:
+                        # If item is a tuple like ('id', 'q'), look up the variable value
+                        if isinstance(item, tuple) and len(item) >= 2 and item[0] == 'id':
+                            var_name = item[1]
+                            if var_name in self.memory:
+                                resolved_right.append(self.memory[var_name])
+                            else:
+                                # If variable not found, just use the name as fallback
+                                resolved_right.append(var_name)
+                        else:
+                            resolved_right.append(item)
+                    
+                    # Now concatenate with properly resolved values
+                    self.memory[result] = left_val + resolved_right
+                else:
+                    # Append a single element to create a new list
+                    self.memory[result] = left_val + [right_val]
+                return
+            elif isinstance(right_val, list):
+                # Prepend a single element to create a new list
+                self.memory[result] = [left_val] + right_val
+                return
+            
+            # Handle string concatenation vs numeric addition
+            # First check if the values are strings and not empty before attempting indexing operations
+            left_is_string = False
+            right_is_string = False
+            
+            if isinstance(left_val, str):
+                if not left_val:  # Empty string
+                    left_is_string = True
+                elif left_val.isdigit():
+                    left_is_string = False
+                elif len(left_val) > 0 and left_val[0] == '-' and left_val[1:].isdigit():
+                    left_is_string = False
+                else:
+                    left_is_string = True
+            
+            if isinstance(right_val, str):
+                if not right_val:  # Empty string
+                    right_is_string = True
+                elif right_val.isdigit():
+                    right_is_string = False
+                elif len(right_val) > 0 and right_val[0] == '-' and right_val[1:].isdigit():
+                    right_is_string = False
+                else:
+                    right_is_string = True
+            
+            if left_is_string or right_is_string:
+                # String concatenation with special handling for booleans
+                if isinstance(left_val, bool):
+                    str_left = "YES" if left_val else "NO"
+                else:
+                    str_left = "" if left_val is None else str(left_val)
+                    
+                if isinstance(right_val, bool):
+                    str_right = "YES" if right_val else "NO"
+                else:
+                    str_right = "" if right_val is None else str(right_val)
+                    
+                self.memory[result] = str_left + str_right
             else:
                 try:
-                    # Convert to appropriate numeric types (handle bools as 1/0)
-                    num_left = float(left_val) if isinstance(left_val, float) else (1 if isinstance(left_val, bool) and left_val else (0 if isinstance(left_val, bool) and not left_val else int(left_val)))
-                    num_right = float(right_val) if isinstance(right_val, float) else (1 if isinstance(right_val, bool) and right_val else (0 if isinstance(right_val, bool) and not right_val else int(right_val)))
-
-                    computed_result = num_left + num_right
+                    # Convert to appropriate numeric types
+                    left_num = float(left_val) if isinstance(left_val, float) or (isinstance(left_val, str) and '.' in left_val) else int(left_val)
+                    right_num = float(right_val) if isinstance(right_val, float) or (isinstance(right_val, str) and '.' in right_val) else int(right_val)
+                    computed_result = left_num + right_num
                     # Validate number before storing
                     self.memory[result] = self.validate_number(computed_result)
-                    if self.debug_mode:
-                        print(f"Numeric ADD: {num_left} + {num_right} -> {self.memory[result]}")
-                except (ValueError, TypeError) as e:
-                     # Fallback or error if numeric conversion/addition fails
-                     # If strict typing is desired, raise error. If permissive, maybe concat?
-                     # For now, raise error for non-numeric/non-string ADD
-                     raise ValueError(f"Cannot perform ADD on incompatible types: {type(left_val).__name__} and {type(right_val).__name__} ({left_val}, {right_val})") from e
+                except ValueError as e:
+                    if "out of range" in str(e) or "too many digits" in str(e):
+                        raise e
+                    # Fallback to string concatenation if conversion fails
+                    self.memory[result] = str(left_val) + str(right_val)
                     
         elif op == 'LIST_EXTEND':
             # Get the list to be modified
@@ -835,168 +861,122 @@ class TACInterpreter:
                 # Extract just the values from typed tuples
                 formatted_list = []
                 for item in val:
-                    # Resolve item if it's a variable name within the list context
-                    resolved_item = self.resolve_variable(item)
-
-                    if isinstance(resolved_item, bool):
-                        formatted_list.append("YES" if resolved_item else "NO")
-                    elif isinstance(resolved_item, (int, float)) and resolved_item < 0:
-                         # Use ~ for negative numbers in lists
-                        formatted_list.append(f"~{abs(resolved_item)}")
+                    if isinstance(item, tuple) and len(item) >= 2:
+                        value = item[1]
+                        # Convert boolean to YES/NO in lists
+                        if isinstance(value, bool):
+                            value = "YES" if value else "NO"
+                        # Format negative numbers with tilde
+                        elif isinstance(value, (int, float)) and value < 0:
+                            value = f"~{abs(value)}"
+                        formatted_list.append(value)
                     else:
-                        formatted_list.append(str(resolved_item))
-                self.output_buffer.write(str(formatted_list))
+                        # Convert boolean to YES/NO in lists
+                        if isinstance(item, bool):
+                            item = "YES" if item else "NO"
+                        # Format negative numbers with tilde
+                        elif isinstance(item, (int, float)) and item < 0:
+                            item = f"~{abs(item)}"
+                        formatted_list.append(item)
+                self.output_buffer.write(str(formatted_list))  # Removed newline
             else:
                 # Convert boolean to YES/NO for direct values
                 if isinstance(val, bool):
-                    print_val = "YES" if val else "NO"
+                    val = "YES" if val else "NO"
                 # Format negative numbers with tilde
                 elif isinstance(val, (int, float)) and val < 0:
-                    print_val = f"~{abs(val)}" # Use ~ for negative numbers
-                else:
-                    print_val = str(val)
-
+                    val = f"~{abs(val)}"
                 # Handle escape sequences in strings
-                if isinstance(print_val, str):
-                    # Process escape sequences manually
-                    processed_val = ""
-                    i = 0
-                    while i < len(print_val):
-                         if print_val[i] == '\\' and i + 1 < len(print_val):
-                              next_char = print_val[i+1]
-                              if next_char == '\\':
-                                   processed_val += '\\'
-                              elif next_char == '"':
-                                   processed_val += '"'
-                              elif next_char == 'n':
-                                   processed_val += '\n'
-                              elif next_char == 't':
-                                   processed_val += '\t'
-                              else:
-                                   processed_val += '\\' + next_char # Keep unrecognized escapes
-                              i += 2
-                         else:
-                              processed_val += print_val[i]
-                              i += 1
-                    print_val = processed_val
-
-                self.output_buffer.write(print_val) # Use the processed value
+                if isinstance(val, str):
+                    # Process escape sequences manually instead of relying on unicode_escape
+                    val = val.replace('\\\\', '\\')  # First handle double backslashes
+                    val = val.replace('\\"', '"')    # Then handle escaped quotes
+                    val = val.replace('\\n', '\n')   # Then handle newlines
+                    val = val.replace('\\t', '\t')   # Then handle tabs
+                self.output_buffer.write(str(val))  # Removed newline
 
         elif op == 'INPUT':
             # Set the input state and pause execution
             self.waiting_for_input = True
-            self.input_result_var = result # Store the variable where input should go
-
+            self.input_result_var = result
+            
             # Get the prompt (or use default)
-            # Resolve arg1 to get the prompt string
             prompt = self.resolve_variable(arg1)
-            if not isinstance(prompt, str):
-                 prompt = str(prompt if prompt is not None else "") # Ensure prompt is a string
-
+            if not prompt:
+                prompt = ""  # Default prompt
             self.input_prompt = prompt
-            if self.debug_mode:
-                print(f"Waiting for input. Prompt: '{self.input_prompt}', Result Var: {self.input_result_var}")
-            # Execution pauses here, resume_with_input will handle the rest
-            pass
         
         elif op == 'CONCAT':
             val1 = self.resolve_variable(arg1)
             val2 = self.resolve_variable(arg2)
-
-            # Always convert operands to string for concatenation
-            # Handle None explicitly to avoid 'None' string
-            str_val1 = "" if val1 is None else str(val1)
-            str_val2 = "" if val2 is None else str(val2)
-
-            # Special formatting for boolean values if needed by language spec
+            
+            # Convert to strings with special handling for booleans and negative numbers
             if isinstance(val1, bool):
                 str_val1 = "YES" if val1 else "NO"
+            elif isinstance(val1, (int, float)) and val1 < 0:
+                str_val1 = f"~{abs(val1)}"
+            else:
+                str_val1 = "" if val1 is None else str(val1)
+                
             if isinstance(val2, bool):
                 str_val2 = "YES" if val2 else "NO"
-
-            # Special formatting for negative numbers if needed
-            # Note: This might conflict if you want "~5" + "2" -> "~52"
-            # Consider if this formatting should only apply during PRINT
-            # if isinstance(val1, (int, float)) and val1 < 0:
-            #     str_val1 = f"~{abs(val1)}"
-            # if isinstance(val2, (int, float)) and val2 < 0:
-            #     str_val2 = f"~{abs(val2)}"
-
-            # Perform concatenation
+            elif isinstance(val2, (int, float)) and val2 < 0:
+                str_val2 = f"~{abs(val2)}"
+            else:
+                str_val2 = "" if val2 is None else str(val2)
+            
+            # Process escape sequences if they exist in the string literals
+            for i, str_val in enumerate([str_val1, str_val2]):
+                if isinstance(str_val, str) and str_val:  # Check if not empty before processing
+                    # Process escape sequences in consistent order
+                    processed = str_val.replace('\\\\', '\\')  # First handle double backslashes
+                    processed = processed.replace('\\"', '"')   # Then handle escaped quotes
+                    processed = processed.replace('\\n', '\n')  # Then handle newlines
+                    processed = processed.replace('\\t', '\t')  # Then handle tabs
+                    
+                    if i == 0:
+                        str_val1 = processed
+                    else:
+                        str_val2 = processed
+            
             self.memory[result] = str_val1 + str_val2
-            if self.debug_mode:
-                print(f"CONCAT: {str_val1} + {str_val2} -> {self.memory[result]}")
 
         elif op == 'TYPECAST':
             val = self.resolve_variable(arg1)
-            target_type = arg2.lower() # Ensure target type is lowercase
-
-            if target_type == 'integer':
+            if arg2 == 'integer':
                 if isinstance(val, bool):
                     self.memory[result] = 1 if val else 0
                 else:
                     try:
-                        str_val = str(val) # Convert to string first
-                        if str_val.startswith('~'):
-                            # Handle custom negative notation
-                            computed_result = -int(str_val[1:])
-                        else:
-                            # Standard conversion
-                            computed_result = int(str_val)
+                        computed_result = int(val)
                         # Validate number before storing
                         self.memory[result] = self.validate_number(computed_result)
                     except (ValueError, TypeError) as e:
-                        # Check for specific range errors if needed
-                        # if "out of range" in str(e) or "too many digits" in str(e):
-                        #     raise e
+                        if "out of range" in str(e) or "too many digits" in str(e):
+                            raise e
                         self.memory[result] = 0  # Default if conversion fails
-
-            elif target_type == 'point':
+            elif arg2 == 'point':
                 if isinstance(val, bool):
                     self.memory[result] = 1.0 if val else 0.0
                 else:
                     try:
-                        str_val = str(val) # Convert to string first
-                        if str_val.startswith('~'):
-                            # Handle custom negative notation
-                            computed_result = -float(str_val[1:])
-                        else:
-                            # Standard conversion
-                            computed_result = float(str_val)
+                        computed_result = float(val)
                         # Validate number before storing
                         self.memory[result] = self.validate_number(computed_result)
                     except (ValueError, TypeError) as e:
-                        # Check for specific range errors if needed
-                        # if "out of range" in str(e) or "too many digits" in str(e):
-                        #     raise e
+                        if "out of range" in str(e) or "too many digits" in str(e):
+                            raise e
                         self.memory[result] = 0.0  # Default if conversion fails
-
-            elif target_type == 'text':
-                 # Convert boolean to YES/NO for text cast
-                if isinstance(val, bool):
-                    self.memory[result] = "YES" if val else "NO"
-                # Format negative numbers with tilde for text cast
-                elif isinstance(val, (int, float)) and val < 0:
-                     self.memory[result] = f"~{abs(val)}"
-                else:
-                    self.memory[result] = str(val)
-
-            elif target_type == 'state':
+            elif arg2 == 'text':
+                self.memory[result] = str(val)
+            elif arg2 == 'state':
                 if isinstance(val, (int, float)):
                     self.memory[result] = bool(val != 0)
                 elif isinstance(val, str):
-                    # Handle specific string representations for state if needed
-                    if val.upper() == "YES":
-                         self.memory[result] = True
-                    elif val.upper() == "NO":
-                         self.memory[result] = False
-                    else:
-                         # Default string-to-bool conversion (non-empty is True)
-                         self.memory[result] = bool(val)
+                    self.memory[result] = bool(val)
                 else:
                     self.memory[result] = bool(val)
             else:
-                # If target type is unknown, just assign the resolved value
                 self.memory[result] = val
 
         elif op == 'LIST_CREATE':
