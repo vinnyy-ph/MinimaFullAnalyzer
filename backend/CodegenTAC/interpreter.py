@@ -1,3 +1,4 @@
+from backend.CodegenTAC.built_in_functions import MinimaBultins
 from io import StringIO
 class TACInterpreter:
     def __init__(self):
@@ -20,6 +21,7 @@ class TACInterpreter:
         self.max_digits = 9
         self.min_number = -999999999
         self.max_number = 999999999
+        self.builtins = MinimaBultins.get_builtin_implementations()
     def validate_number(self, value):
         """Validate that a number is within the allowed range."""
         if value is None or not isinstance(value, (int, float)):
@@ -240,6 +242,28 @@ class TACInterpreter:
             right_val = self.resolve_variable(arg2)
             print(f"Condition: {left_val} {op} {right_val}")
         if op == 'CALL':
+            # Check for built-in functions
+            if arg1 in self.builtins:
+                # Extract arguments from param_stack
+                args = []
+                for i in range(arg2):  # arg2 contains parameter count
+                    for param_idx, param_val in self.param_stack:
+                        if param_idx == i:
+                            resolved_val = self.resolve_variable(param_val)
+                            args.append(resolved_val)
+                            break
+                
+                # Call the built-in function
+                try:
+                    return_val = self.builtins[arg1](self, args)
+                    self.memory[result] = return_val
+                except Exception as e:
+                    raise ValueError(f"Error in built-in function {arg1}: {str(e)}")
+                
+                # Clean up and continue
+                self.param_stack = []
+                self.ip += 1
+                return
             if arg1 in self.functions:
                 context = {
                     'ip': self.ip + 1,

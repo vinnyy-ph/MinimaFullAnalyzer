@@ -2,6 +2,7 @@ import re
 from lark import Visitor
 from .symbol_table import SymbolTable
 from .semantic_errors import InvalidListOperandError, ListIndexOutOfRangeError, SemanticError, FunctionRedefinedError, ParameterMismatchError, FunctionNotDefinedError, UndefinedIdentifierError, RedeclarationError, FixedVarReassignmentError, ControlFlowError, TypeMismatchError, UnreachableCodeError, InvalidListAccessError, InvalidGroupAccessError
+from ..CodegenTAC.built_in_functions import MinimaBultins
 def convert_state_to_int(state):
     return 1 if state == "YES" else 0
 def convert_state_to_point(state):
@@ -21,6 +22,7 @@ class SemanticAnalyzer(Visitor):
         self.function_returns = {}  
         self.function_throw_expressions = {}  
         self.loop_stack = []  
+        self.builtin_functions = MinimaBultins.get_builtin_metadata()
     def push_scope(self):
         self.current_scope = SymbolTable(parent=self.current_scope)
     def pop_scope(self):
@@ -1083,18 +1085,31 @@ class SemanticAnalyzer(Visitor):
         line = ident.line
         column = ident.column
         name = ident.value
+        
         if len(children) > 1 and hasattr(children[1], 'data') and children[1].data == "func_call":
-            func_symbol = self.global_scope.lookup_function(name)
-            if func_symbol is None:
-                self.errors.append(FunctionNotDefinedError(name, line, column))
-                result = ("unknown", None)
-            else:
-                expected = len(func_symbol.params)
-                arg_values = self.evaluate_function_args(children[1])
+            # Get the function arguments regardless of whether it's built-in or user-defined
+            arg_values = self.evaluate_function_args(children[1])
+            
+            # First check if it's a built-in function
+            if name in self.builtin_functions:
+                # It's a built-in function - validate argument count if necessary
+                expected = self.builtin_functions[name]['params']
                 provided = len(arg_values)
+                
                 if expected != provided:
                     self.errors.append(ParameterMismatchError(
                         name, expected, provided, line, column))
+                    result = ("unknown", None)
+                else:
+                    # Return the appropriate type for the built-in function
+                    result_type = self.builtin_functions[name]['return_type']
+                    result = (result_type, None)
+                    print(f"Function call to built-in '{name}' with result type: {result_type}")
+            else:
+                # Original code for user-defined functions
+                func_symbol = self.global_scope.lookup_function(name)
+                if func_symbol is None:
+                    self.errors.append(FunctionNotDefinedError(name, line, column))
                     result = ("unknown", None)
                 else:
                     dynamic_result = None
@@ -1173,6 +1188,14 @@ class SemanticAnalyzer(Visitor):
         func_name = func_token.value
         line = func_token.line
         column = func_token.column
+        
+        # Check if the function name conflicts with a built-in
+        if func_name in self.builtin_functions:
+            self.errors.append(FunctionRedefinedError(
+                f"{func_name} (built-in function)", line, column))
+            return
+            
+        # Original code for function definition
         params = []
         params_node = node.children[3]
         if hasattr(params_node, "children"):
