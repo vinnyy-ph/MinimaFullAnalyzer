@@ -362,76 +362,96 @@ class TACInterpreter:
         elif op == 'ADD':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
-            if isinstance(left_val, list):
-                if isinstance(right_val, list):
-                    resolved_right = []
-                    for item in right_val:
-                        if isinstance(item, tuple) and len(item) >= 2 and item[0] == 'id':
-                            var_name = item[1]
-                            if var_name in self.memory:
-                                resolved_right.append(self.memory[var_name])
-                            else:
-                                resolved_right.append(var_name)
+            
+            # Case 1: List concatenation - when either operand is a list
+            if isinstance(left_val, list) or isinstance(right_val, list):
+                # Convert non-list operands to single-item lists
+                if not isinstance(left_val, list):
+                    left_list = [left_val]
+                else:
+                    left_list = left_val.copy()  # Make a copy to avoid modifying original
+                    
+                if not isinstance(right_val, list):
+                    right_list = [right_val]
+                else:
+                    right_list = right_val.copy()  # Make a copy to avoid modifying original
+                    
+                # Process right list to resolve any references
+                processed_right = []
+                for item in right_list:
+                    if isinstance(item, tuple) and len(item) >= 2 and item[0] == 'id':
+                        var_name = item[1]
+                        if var_name in self.memory:
+                            processed_right.append(self.memory[var_name])
                         else:
-                            resolved_right.append(item)
-                    self.memory[result] = left_val + resolved_right
-                else:
-                    self.memory[result] = left_val + [right_val]
+                            processed_right.append(var_name)
+                    else:
+                        processed_right.append(item)
+                        
+                # Create the concatenated list
+                self.memory[result] = left_list + processed_right
                 return
-            elif isinstance(right_val, list):
-                self.memory[result] = [left_val] + right_val
-                return
-            left_is_string = False
-            right_is_string = False
-            if isinstance(left_val, str):
-                if not left_val:  
-                    left_is_string = True
-                elif left_val.isdigit():
-                    left_is_string = False
-                elif len(left_val) > 0 and left_val[0] == '-' and left_val[1:].isdigit():
-                    left_is_string = False
-                else:
-                    left_is_string = True
-            if isinstance(right_val, str):
-                if not right_val:  
-                    right_is_string = True
-                elif right_val.isdigit():
-                    right_is_string = False
-                elif len(right_val) > 0 and right_val[0] == '-' and right_val[1:].isdigit():
-                    right_is_string = False
-                else:
-                    right_is_string = True
+                
+            # Case 2: String concatenation or numeric addition
+            left_is_string = isinstance(left_val, str) and not (
+                left_val.isdigit() or 
+                (len(left_val) > 0 and left_val[0] == '-' and left_val[1:].isdigit()) or
+                (len(left_val) > 0 and left_val[0] == '~' and left_val[1:].isdigit())
+            )
+            
+            right_is_string = isinstance(right_val, str) and not (
+                right_val.isdigit() or 
+                (len(right_val) > 0 and right_val[0] == '-' and right_val[1:].isdigit()) or
+                (len(right_val) > 0 and right_val[0] == '~' and right_val[1:].isdigit())
+            )
+            
             if left_is_string or right_is_string:
+                # String concatenation
                 if isinstance(left_val, bool):
                     str_left = "YES" if left_val else "NO"
                 else:
                     str_left = "" if left_val is None else str(left_val)
+                    
                 if isinstance(right_val, bool):
                     str_right = "YES" if right_val else "NO"
                 else:
                     str_right = "" if right_val is None else str(right_val)
+                    
                 self.memory[result] = str_left + str_right
             else:
+                # Numeric addition
                 try:
+                    # Convert to appropriate numeric types
                     left_num = float(left_val) if isinstance(left_val, float) or (isinstance(left_val, str) and '.' in left_val) else int(left_val)
                     right_num = float(right_val) if isinstance(right_val, float) or (isinstance(right_val, str) and '.' in right_val) else int(right_val)
+                    
+                    # Perform addition
                     computed_result = left_num + right_num
+                    
+                    # Validate the result
                     self.memory[result] = self.validate_number(computed_result)
                 except ValueError as e:
                     if "out of range" in str(e) or "too many digits" in str(e):
                         raise e
+                    # If not a number, fall back to string concatenation
                     self.memory[result] = str(left_val) + str(right_val)
         elif op == 'LIST_EXTEND':
             list_var = self.resolve_variable(arg1)
             extension = self.resolve_variable(arg2)
+            
+            # Initialize as empty list if it doesn't exist or isn't a list
             if not isinstance(list_var, list):
                 list_var = []
                 self.memory[arg1] = list_var
+            
+            # Handle different extension scenarios
             if isinstance(extension, list):
+                # Extending with another list (concatenation)
                 resolved_extension = []
                 for item in extension:
                     if isinstance(item, str):
                         resolved_item = self.resolve_variable(item)
+                        # If the resolved value is the same as the original and it's a variable name
                         if resolved_item == item and item in self.memory:
                             resolved_item = self.memory[item]
                         resolved_extension.append(resolved_item)
@@ -441,34 +461,78 @@ class TACInterpreter:
                             if var_name in self.memory:
                                 resolved_extension.append(self.memory[var_name])
                             else:
-                                resolved_extension.append(var_name)  
+                                resolved_extension.append(var_name)
                         else:
                             resolved_extension.append(item[1])
                     else:
                         resolved_extension.append(item)
                 list_var.extend(resolved_extension)
             else:
+                # Extending with a single element
+                extension_value = extension
                 if isinstance(extension, str) and extension in self.memory:
-                    extension = self.memory[extension]
-                list_var.append(extension)
+                    extension_value = self.memory[extension]
+                    
+                # If extension is wrapped in [brackets], add as a single element
+                # Otherwise append as an individual value
+                if isinstance(arg2, str) and arg2.startswith('[') and arg2.endswith(']'):
+                    # Extract the value inside brackets if explicitly provided
+                    inner_value = arg2[1:-1].strip()
+                    if inner_value:
+                        list_var.append(self.resolve_variable(inner_value))
+                    else:
+                        # Empty brackets means append an empty list
+                        list_var.append([])
+                else:
+                    # Regular append of a single value
+                    list_var.append(extension_value)
+            
+            # Update the result or original variable
             if result is not None:
                 self.memory[result] = list_var
+            else:
+                self.memory[arg1] = list_var
         elif op == 'LIST_SET':
             list_var = self.resolve_variable(arg1)
-            index = self.resolve_variable(arg2)
+            index_raw = self.resolve_variable(arg2) # Get the raw index value/tuple
             value = self.resolve_variable(result)
-            
+
+            # Extract the actual index value if it's a tuple
+            if isinstance(index_raw, tuple) and len(index_raw) >= 2:
+                index = index_raw[1]
+            else:
+                index = index_raw
+
             if isinstance(list_var, list):
-                if isinstance(index, int) and 0 <= index < len(list_var):
-                    list_var[index] = value
-                elif isinstance(index, int) and index >= len(list_var):
-                    # Extend the list if needed
-                    while len(list_var) <= index:
-                        list_var.append(None)
-                    list_var[index] = value
+                # Convert index to integer if possible
+                try:
+                    if isinstance(index, str) and index.isdigit():
+                        index = int(index)
+                    elif isinstance(index, str) and index.startswith('~') and index[1:].isdigit():
+                        index = -int(index[1:])
+                    elif not isinstance(index, int):
+                        # Attempt conversion only if not already an int
+                        index = int(index)
+                except (ValueError, TypeError):
+                    # Raise error with the original raw index for clarity
+                    raise ValueError(f"Invalid list index: {index_raw}")
+
+                # Handle negative index normalization
+                if index < 0:
+                    normalized_index = index + len(list_var)
                 else:
-                    # Handle invalid index
-                    raise ValueError(f"Invalid list index: {index}")
+                    normalized_index = index
+
+                # Extend the list if needed for positive indices
+                if normalized_index >= len(list_var) and normalized_index >= 0:
+                    # Extend the list with None values
+                    while len(list_var) <= normalized_index:
+                        list_var.append(None)
+                    list_var[normalized_index] = value
+                elif 0 <= normalized_index < len(list_var):
+                    list_var[normalized_index] = value
+                else:
+                    raise ValueError(f"List index out of range: {index}")
             else:
                 raise ValueError(f"Cannot assign to index of non-list: {arg1}")
         elif op == 'SUB':
@@ -771,75 +835,76 @@ class TACInterpreter:
                 self.memory[arg1] = [item]
         elif op == 'LIST_ACCESS':
             list_var = self.resolve_variable(arg1)
-            index_raw = arg2  
+            index_raw = arg2 # Keep the raw argument
+
             try:
-                if isinstance(index_raw, tuple) and len(index_raw) >= 2:
-                    if index_raw[0] == 'id':
-                        var_name = index_raw[1]
-                        if var_name in self.memory:
-                            index = self.memory[var_name]
-                        else:
-                            if self.debug_mode:
-                                print(f"Variable '{var_name}' not found for indexing, using 0")
-                            index = 0
-                    else:
-                        index = index_raw[1]
+                # Resolve the index variable/literal first
+                resolved_index = self.resolve_variable(index_raw)
+
+                # Extract the actual index value if it's a tuple
+                if isinstance(resolved_index, tuple) and len(resolved_index) >= 2:
+                    index = resolved_index[1]
                 else:
-                    index = self.resolve_variable(index_raw)
+                    index = resolved_index
+
+                # Convert index to integer if possible
                 try:
-                    index = int(index)
+                    if isinstance(index, str) and index.isdigit():
+                        index = int(index)
+                    elif isinstance(index, str) and index.startswith('~') and index[1:].isdigit():
+                        index = -int(index[1:])
+                    elif not isinstance(index, int):
+                         # Attempt conversion only if not already an int
+                        index = int(index)
                 except (ValueError, TypeError):
-                    if self.debug_mode:
-                        print(f"Warning: Could not convert index {index} to integer, using 0")
-                    index = 0
+                    # Use original raw index in error message
+                    raise ValueError(f"Invalid list index: {index_raw}")
+
             except Exception as e:
-                if self.debug_mode:
-                    print(f"Exception during index extraction: {e}")
-                index = 0
+                 # Use original raw index in error message
+                raise ValueError(f"Error resolving list index '{index_raw}': {e}")
+
             try:
                 if isinstance(list_var, list):
+                    # Handle list access
                     list_length = len(list_var)
+
+                    # Normalize negative index to positive equivalent
                     if index < 0:
                         normalized_index = index + list_length
                     else:
                         normalized_index = index
+
                     if 0 <= normalized_index < list_length:
-                        element = list_var[normalized_index]
-                        if isinstance(element, tuple) and len(element) >= 2:
-                            self.memory[result] = element[1]
-                        else:
-                            self.memory[result] = element
+                        self.memory[result] = list_var[normalized_index]
                     else:
-                        if self.debug_mode:
-                            print(f"List index out of bounds: {normalized_index} (list length: {list_length})")
-                        self.memory[result] = None
+                        raise IndexError(f"List index {index} out of range for list of length {list_length}")
+
                 elif isinstance(list_var, str):
+                    # Handle string access (treat strings like lists of characters)
                     string_length = len(list_var)
+
+                    # Normalize negative index to positive equivalent
                     if index < 0:
                         normalized_index = index + string_length
                     else:
                         normalized_index = index
+
                     if 0 <= normalized_index < string_length:
-                        try:
-                            self.memory[result] = list_var[normalized_index]
-                            if self.debug_mode:
-                                print(f"String access: '{list_var}' at index {normalized_index} = '{list_var[normalized_index]}'")
-                        except IndexError:
-                            if self.debug_mode:
-                                print(f"Index error handled: {normalized_index} for string of length {string_length}")
-                            self.memory[result] = None
+                        self.memory[result] = list_var[normalized_index]
                     else:
-                        if self.debug_mode:
-                            print(f"String index out of bounds: {normalized_index} (string: '{list_var}', length: {string_length})")
-                        self.memory[result] = None
+                         raise IndexError(f"String index {index} out of range for string of length {string_length}")
+
                 else:
                     if self.debug_mode:
-                        print(f"Warning: Cannot index non-list/non-string: {arg1} ({type(list_var).__name__})")
-                    self.memory[result] = None
+                        print(f"Warning: Attempted LIST_ACCESS on non-list/non-string variable '{arg1}'")
+                    self.memory[result] = None # Or raise error? Minima might allow this returning 'empty'
+            except IndexError as e:
+                 raise ValueError(f"Runtime Error: {e}")
             except Exception as e:
                 if self.debug_mode:
                     print(f"Error during LIST_ACCESS operation: {e}")
-                self.memory[result] = None
+                raise ValueError(f"Runtime Error during list access: {e}")
         elif op == 'GROUP_ACCESS':
             group = self.resolve_variable(arg1)
             key = self.resolve_variable(arg2)
