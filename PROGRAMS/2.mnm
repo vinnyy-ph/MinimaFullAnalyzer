@@ -1,3 +1,5 @@
+var num, result;
+
 func sumDigits(number) {
     var sum = 0;
     repeat (number > 0) {
@@ -8,7 +10,12 @@ func sumDigits(number) {
     throw sum;
 }
 
+num = integer(get("Enter a positive number: "));
 
-var num = integer(get("Enter a number: "));
-var result = sumDigits(num);
+repeat (num < 0){
+    num = integer(get("Error ! Please enter a positive number again: "));
+}
+
+
+result = sumDigits(num);
 show("The sum of digits is: " + text(result));

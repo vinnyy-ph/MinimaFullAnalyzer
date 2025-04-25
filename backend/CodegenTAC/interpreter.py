@@ -40,7 +40,7 @@ class TACInterpreter:
         # Check range for integers
         if isinstance(value, int):
             if value < self.min_number or value > self.max_number:
-                raise ValueError(f"Number out of range: {value}. Valid range is {self.min_number} to {self.max_number}")
+                raise ValueError(f"Integer out of range: {value}. Valid range is {self.min_number} to {self.max_number}")
         
         # Check digit limits for floats
         elif isinstance(value, float):
@@ -57,7 +57,9 @@ class TACInterpreter:
             if len(parts) > 1:
                 fractional_part = parts[1]
                 if len(fractional_part) > self.max_digits:
-                    raise ValueError(f"Number has too many digits in fractional part: {value}. Maximum {self.max_digits} digits allowed")
+                    # Instead of raising error, truncate to 9 decimal places
+                    truncated = round(value, self.max_digits)
+                    return truncated
             
             # Also check absolute magnitude isn't too large
             if abs(value) > float(self.max_number) + 0.999999999:
@@ -297,7 +299,7 @@ class TACInterpreter:
         return self.output_buffer.getvalue()
     
     def resume_with_input(self, user_input):
-        """Resume execution after receiving user input with number validation."""
+        """Resume execution after receiving user input with strict number validation."""
         if not self.waiting_for_input:
             raise ValueError("Interpreter is not waiting for input")
         
@@ -305,27 +307,49 @@ class TACInterpreter:
         try:
             # Check if it's a tilde-prefixed negative number
             if user_input.startswith('~') and len(user_input) > 1:
-                # Convert tilde notation to minus sign for internal processing
-                input_val = -int(user_input[1:])
-            else:
-                # Regular integer conversion
-                input_val = int(user_input)
-            # Validate the number
-            input_val = self.validate_number(input_val)
-        except ValueError:
-            try:
-                # Try float if integer conversion failed
-                if user_input.startswith('~') and len(user_input) > 1:
-                    # Convert tilde notation to minus sign for internal processing
-                    input_val = -float(user_input[1:])
+                # Check the digit limits before conversion
+                num_str = user_input[1:]
+                parts = num_str.split('.')
+                
+                # Check integer part (left of decimal)
+                if len(parts[0]) > self.max_digits:
+                    raise ValueError(f"Input integer part has {len(parts[0])} digits. Maximum {self.max_digits} digits allowed.")
+                
+                # Check fractional part (right of decimal) if present
+                if len(parts) > 1 and len(parts[1]) > self.max_digits:
+                    raise ValueError(f"Input decimal part has {len(parts[1])} digits. Maximum {self.max_digits} digits allowed.")
+                    
+                # Now try conversion
+                if '.' in num_str:
+                    input_val = -float(num_str)
                 else:
-                    # Regular float conversion
+                    input_val = -int(num_str)
+            else:
+                # Check the digit limits for positive numbers
+                parts = user_input.split('.')
+                
+                # Check integer part (left of decimal)
+                if len(parts[0]) > self.max_digits:
+                    raise ValueError(f"Input integer part has {len(parts[0])} digits. Maximum {self.max_digits} digits allowed.")
+                
+                # Check fractional part (right of decimal) if present
+                if len(parts) > 1 and len(parts[1]) > self.max_digits:
+                    raise ValueError(f"Input decimal part has {len(parts[1])} digits. Maximum {self.max_digits} digits allowed.")
+                    
+                # Now try conversion
+                if '.' in user_input:
                     input_val = float(user_input)
-                # Validate the number
-                input_val = self.validate_number(input_val)
-            except ValueError:
-                # If not a valid number, keep as string
-                input_val = user_input
+                else:
+                    input_val = int(user_input)
+            
+            # Final range validation
+            input_val = self.validate_number(input_val)
+        except ValueError as e:
+            # If conversion or validation failed, check if it's due to our constraints
+            if "digits" in str(e) or "out of range" in str(e):
+                raise e  # Re-raise our validation errors
+            # If not, treat as string input
+            input_val = user_input
         
         # Store the validated input
         self.memory[self.input_result_var] = input_val
@@ -898,7 +922,16 @@ class TACInterpreter:
                             value = "YES" if value else "NO"
                         # Format negative numbers with tilde
                         elif isinstance(value, (int, float)) and value < 0:
-                            value = f"~{abs(value)}"
+                            if isinstance(value, float):
+                                # Format with at most 9 decimal places
+                                decimal_str = f"{abs(value):.9f}".rstrip('0').rstrip('.')
+                                value = f"~{decimal_str}"
+                            else:
+                                value = f"~{abs(value)}"
+                        # Format positive floats with limited decimal precision
+                        elif isinstance(value, float):
+                            # Convert to string with max 9 decimal places
+                            value = f"{value:.9f}".rstrip('0').rstrip('.')
                         formatted_list.append(value)
                     else:
                         # Convert boolean to YES/NO in lists
@@ -906,16 +939,35 @@ class TACInterpreter:
                             item = "YES" if item else "NO"
                         # Format negative numbers with tilde
                         elif isinstance(item, (int, float)) and item < 0:
-                            item = f"~{abs(item)}"
+                            if isinstance(item, float):
+                                # Format with at most 9 decimal places
+                                decimal_str = f"{abs(item):.9f}".rstrip('0').rstrip('.')
+                                item = f"~{decimal_str}"
+                            else:
+                                item = f"~{abs(item)}"
+                        # Format positive floats with limited decimal precision
+                        elif isinstance(item, float):
+                            # Convert to string with max 9 decimal places
+                            item = f"{item:.9f}".rstrip('0').rstrip('.')
                         formatted_list.append(item)
-                self.output_buffer.write(str(formatted_list))  # Removed newline
+                self.output_buffer.write(str(formatted_list))
             else:
                 # Convert boolean to YES/NO for direct values
                 if isinstance(val, bool):
                     val = "YES" if val else "NO"
                 # Format negative numbers with tilde
                 elif isinstance(val, (int, float)) and val < 0:
-                    val = f"~{abs(val)}"
+                    if isinstance(val, float):
+                        # Format with at most 9 decimal places
+                        decimal_str = f"{abs(val):.9f}".rstrip('0').rstrip('.')
+                        val = f"~{decimal_str}"
+                    else:
+                        val = f"~{abs(val)}"
+                # Format positive floats with limited decimal precision
+                elif isinstance(val, float):
+                    # Convert to string with max 9 decimal places
+                    val = f"{val:.9f}".rstrip('0').rstrip('.')
+                
                 # Handle escape sequences in strings
                 if isinstance(val, str):
                     # Process escape sequences manually instead of relying on unicode_escape
@@ -923,7 +975,8 @@ class TACInterpreter:
                     val = val.replace('\\"', '"')    # Then handle escaped quotes
                     val = val.replace('\\n', '\n')   # Then handle newlines
                     val = val.replace('\\t', '\t')   # Then handle tabs
-                self.output_buffer.write(str(val))  # Removed newline
+                
+                self.output_buffer.write(str(val))
 
         elif op == 'INPUT':
             # Set the input state and pause execution

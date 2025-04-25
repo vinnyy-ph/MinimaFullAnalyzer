@@ -243,7 +243,9 @@ class SemanticAnalyzer(Visitor):
         if hasattr(node, "data") and node.data == "id_usage" and hasattr(node.children[0], "value"):
             var_name = node.children[0].value
         elif hasattr(node.children[0], "data") and node.children[0].data == "id_usage":
-            var_name = node.children[0].children[0].value
+            # Handle cases where id_usage might be nested, e.g., within operand
+            if node.children[0].children and hasattr(node.children[0].children[0], "value"):
+                 var_name = node.children[0].children[0].value
         
         if not var_name:
             return
@@ -260,29 +262,35 @@ class SemanticAnalyzer(Visitor):
             
         var_type = var_value[0]
         
-        # IMPORTANT: Skip list access check for parameters or get() results
-        # This is the main fix - don't validate list access for parameters
-        if var_type == "parameter" or var_type == "get" or var_type == "unknown":
-            return
+        # IMPORTANT: Allow list access check for parameters, get() results, or unknown
+        # We permit list/text access syntactically but cannot fully validate type statically.
+        # Group access is still restricted.
+        # if var_type == "parameter" or var_type == "get" or var_type == "unknown":
+        #     return # OLD LOGIC: Skip check entirely
             
-        # Check for list access on this node or its children
+        # Check for list or group access on this node or its children
         for child in node.children:
             if (hasattr(child, "data") and child.data == "group_or_list" and 
                 child.children and hasattr(child.children[0], "type")):
-                # Found list access, check if variable is a list or text
-                if child.children[0].type == "LSQB" and var_type != "list" and var_type != "text":
-                    # This is list access on a non-list and non-text variable!
-                    line = node.children[0].line if hasattr(node.children[0], "line") else 0
-                    column = node.children[0].column if hasattr(node.children[0], "column") else 0
-                    self.errors.append(InvalidListAccessError(var_name, line, column))
-                    return
-                # Check for group access on non-group
-                elif child.children[0].type == "LBRACE" and var_type != "group":
-                    # This is group access on a non-group!
-                    line = node.children[0].line if hasattr(node.children[0], "line") else 0
-                    column = node.children[0].column if hasattr(node.children[0], "column") else 0
-                    self.errors.append(InvalidGroupAccessError(var_name, line, column))
-                    return
+                
+                accessor_type = child.children[0].type
+                line = node.children[0].line if hasattr(node.children[0], "line") else 0
+                column = node.children[0].column if hasattr(node.children[0], "column") else 0
+
+                # Check for list access [ ]
+                if accessor_type == "LSQB":
+                    # Allow list access on list, text, parameter, get, unknown
+                    allowed_types = ["list", "text", "parameter", "get", "unknown"]
+                    if var_type not in allowed_types and not str(var_type).startswith("g"):
+                        self.errors.append(InvalidListAccessError(var_name, line, column))
+                        return
+                # Check for group access { }
+                elif accessor_type == "LBRACE":
+                    # Allow group access only on group, parameter, get, unknown
+                    allowed_types = ["group", "parameter", "get", "unknown"]
+                    if var_type not in allowed_types and not str(var_type).startswith("g"):
+                        self.errors.append(InvalidGroupAccessError(var_name, line, column))
+                        return
 
     def visit_list_value(self, node):
         # 'items' contains the first expression and (optionally) the list_tail.
@@ -1421,44 +1429,42 @@ class SemanticAnalyzer(Visitor):
                         name, expected, provided, line, column))
                     result = ("unknown", None)
                 else:
-                    # FIXED: First check if there's a throw expression to evaluate with parameters
+                    # --- MODIFIED Function Call Result Logic ---
+                    # Option 1: Try to evaluate the throw expression dynamically with arguments
+                    dynamic_result = None
                     if name in self.function_throw_expressions:
-                        # Get the thrown expression
                         expr_node = self.function_throw_expressions[name]
-                        
-                        # Save the current scope and create a new one for function evaluation
-                        old_scope = self.current_scope
-                        self.push_scope()
-                        
-                        # Define parameters with argument values
-                        for i, param_name in enumerate(func_symbol.params):
-                            self.current_scope.define_variable(param_name, fixed=False)
-                            self.current_scope.variables[param_name].value = arg_values[i]
-                        
-                        # Evaluate the thrown expression in this scope
-                        result = self.get_value(expr_node)
-                        
-                        # Store the result for this specific call
-                        self.function_returns[name] = result
-                        
-                        # Restore the previous scope
-                        self.pop_scope()
-                        
-                        if isinstance(result, tuple) and len(result) >= 2:
-                            print(f"Function call to '{name}' returns {result[1]} of type {result[0]}")
+                        # Check if any argument involves 'get' or 'unknown' or 'parameter'
+                        args_are_dynamic = any(arg[0] in ['get', 'unknown', 'parameter'] or str(arg[0]).startswith('g') for arg in arg_values)
+
+                        if not args_are_dynamic:
+                            # If args are concrete, evaluate dynamically
+                            old_scope = self.current_scope
+                            self.push_scope()
+                            # Define parameters with actual argument values
+                            for i, param_name in enumerate(func_symbol.params):
+                                self.current_scope.define_variable(param_name, fixed=False)
+                                self.current_scope.variables[param_name].value = arg_values[i]
+                            # Evaluate the stored expression node
+                            dynamic_result = self.get_value(expr_node)
+                            self.pop_scope()
+                            print(f"Function call '{name}' dynamically evaluated throw expression -> type {dynamic_result[0]}")
                         else:
-                            print(f"Function call to '{name}' returns {result}")
-                    elif name in self.function_returns:
-                        # Only fallback to stored return value if no expression is available
-                        result = self.function_returns[name]
-                        if isinstance(result, tuple) and len(result) >= 2:
-                            print(f"Function call to '{name}' returns {result[1]} of type {result[0]}")
-                        else:
-                            print(f"Function call to '{name}' returns {result}")
+                            print(f"Function call '{name}' has dynamic args, skipping dynamic evaluation.")
+
+                    # Option 2: Use the statically determined return type (fallback)
+                    if dynamic_result is not None:
+                        result = dynamic_result
                     else:
-                        # If no return value is stored, return empty
-                        result = ("empty", None)
-                        print(f"Function call to '{name}' throws value empty")
+                        # Use the type determined during function definition analysis
+                        result = self.function_returns.get(name, ("empty", None))
+                        print(f"Function call '{name}' using statically determined return type: {result[0]}")
+                    # --- End MODIFIED Logic ---
+
+                    if isinstance(result, tuple) and len(result) >= 2:
+                        print(f"Function call to '{name}' result: value={result[1]}, type={result[0]}")
+                    else:
+                        print(f"Function call to '{name}' result: {result}")
         else:
             # Look up the variable in the current scope - proper scope resolution
             symbol = self.current_scope.lookup_variable(name)
@@ -1517,7 +1523,7 @@ class SemanticAnalyzer(Visitor):
         """
         Handles function definitions with syntax:
         func identifier(param1, param2) { function_prog }
-        Only registers function and parameters but DOES NOT analyze function body.
+        MODIFIED: Analyzes function body to determine return type.
         """
         # children: [FUNC, IDENTIFIER, LPAREN, param_node, RPAREN, LBRACE, function_prog, RBRACE, (optional SEMICOLON)]
         func_token = node.children[1]
@@ -1537,40 +1543,80 @@ class SemanticAnalyzer(Visitor):
                             f"Parameter '{child.value}' is declared more than once in function '{func_name}'", child.line, child.column))
                     else:
                         params.append(child.value)
-        else:
-            # Single parameter case (params_node is likely a Token)
-            if hasattr(params_node, "type") and params_node.type == "IDENTIFIER":
-                params.append(params_node.value)
+        elif hasattr(params_node, "type") and params_node.type == "IDENTIFIER":
+            # Single parameter case
+            params.append(params_node.value)
     
         # Define the function in the global scope; report error if redefined.
         if not self.global_scope.define_function(func_name, params=params, line=line, column=column):
             self.errors.append(FunctionRedefinedError(func_name, line, column))
-            return
+            # Even if redefined, try to analyze the body to potentially catch more errors within it
+            # but don't store its return type if the definition itself is invalid.
+            # return # Optionally return early if redefinition should halt analysis
     
         # Print tracking message for function definition
-        print(f'Function "{func_name}" defined with parameters {params}')
+        print(f'Analyzing function "{func_name}" defined with parameters {params}')
     
-        # MODIFICATION: Default return value for function (assume empty return)
-        # We won't analyze the function body, so just set a default return value
-        self.function_returns[func_name] = ("empty", None)
-        print(f"Function '{func_name}' assumed to throw value empty (body not analyzed)")
-        
-        # Store the function body for later (actual execution) but don't analyze it
+        # --- Start Analysis of Function Body ---
+        # Store current state
+        outer_function = self.current_function
+        outer_has_return = self.has_return
+        self.current_function = func_name
+        self.has_return = False # Reset for this function's analysis
+        # Initialize return type assumption
+        self.function_returns[func_name] = ("empty", None) # Default if no throw found
+        self.function_throw_expressions.pop(func_name, None) # Clear any previous throw expression node
+    
+        # Push a new scope for the function body
+        self.push_scope()
+    
+        # Define parameters in the function's scope
+        for param_name in params:
+            # Define parameters as variables, marking their type as 'parameter'
+            self.current_scope.define_variable(param_name, fixed=False)
+            self.current_scope.variables[param_name].value = ("parameter", None) # Mark as parameter type
+    
+        # Visit the function body (node.children[6])
         function_body = node.children[6]
-        # We could store this if needed for runtime execution, but we don't analyze it
-        
+        self.visit(function_body)
+    
+        # Pop the function's scope
+        self.pop_scope()
+    
+        # After visiting the body, check if a throw was found
+        if not self.has_return:
+            print(f"Function '{func_name}' has no throw statement. Assumed to return empty.")
+            self.function_returns[func_name] = ("empty", None)
+        elif func_name in self.function_returns:
+             # A throw was found and its type recorded in visit_throw_statement
+             return_type_info = self.function_returns[func_name]
+             print(f"Function '{func_name}' analysis complete. Determined return type: {return_type_info[0]}")
+        else:
+             # This case should ideally not happen if has_return is true, but as a fallback:
+             print(f"Function '{func_name}' analysis complete. Throw found but type unclear, defaulting to unknown.")
+             self.function_returns[func_name] = ("unknown", None)
+    
+        # Restore outer state
+        self.current_function = outer_function
+        self.has_return = outer_has_return
+        # --- End Analysis of Function Body ---
+    
+        return # Added return None for clarity
+
     def visit_function_prog(self, node):
         """
         Visits the function body (a block of statements inside the function).
-        MODIFIED: No semantic checking is performed on function bodies.
+        MODIFIED: Performs semantic checking on function bodies.
         """
-        # Skip semantic checking of function bodies
-        return None
+        # Visit all statements within the function body
+        for child in node.children:
+            self.visit(child)
+        return None # Return None after visiting children
 
     def visit_throw_statement(self, node):
         """
         Processes a throw statement - needs to be in a function.
-        MODIFIED: Just register that function has a throw but don't analyze the expression
+        MODIFIED: Evaluates the expression type and stores it and the node.
         """
         if not self.current_function:
             throw_token = node.children[0]
@@ -1579,15 +1625,27 @@ class SemanticAnalyzer(Visitor):
             self.errors.append(ControlFlowError(
                 "throw", "functions", line, column))
             return None
-        
-        # Just mark the function as having a return value without analyzing expression
-        self.function_returns[self.current_function] = ("unknown", None)
-        
-        # Set that this function has a return value
+
+        # Get the expression node
+        expr_node = node.children[1]
+
+        # Evaluate the expression within the current function's scope
+        # This evaluation uses the parameter types defined in visit_func_definition
+        thrown_value = self.get_value(expr_node)
+
+        # Store the *evaluated type* for static analysis purposes
+        # If the evaluation involves parameters/get, it might result in ('unknown', None) or ('parameter', None)
+        # which is the correct static assessment.
+        self.function_returns[self.current_function] = thrown_value
+
+        # Store the *expression node itself* for potential re-evaluation at call time
+        self.function_throw_expressions[self.current_function] = expr_node
+
+        # Mark that this function has a return path
         self.has_return = True
-        
-        print(f"Function '{self.current_function}' throws an expression (not analyzed)")
-        
+
+        print(f"Function '{self.current_function}' throws expression. Inferred type: {thrown_value[0]}")
+
         return None
     
     def evaluate_function_args(self, func_call_node):
@@ -1985,6 +2043,8 @@ class SemanticAnalyzer(Visitor):
     
         # Retrieve the parent id_usage to know which variable is being accessed
         parent = getattr(node, 'parent', None)
+        result = ("unknown", None) # Default result if access fails or type is unknown
+
         if parent and hasattr(parent, 'data') and parent.data == 'id_usage':
             var_name = parent.children[0].value
             var_symbol = self.current_scope.lookup_variable(var_name)
@@ -1992,91 +2052,82 @@ class SemanticAnalyzer(Visitor):
                 var_value = getattr(var_symbol, "value", None)
                 if var_value:
                     var_type = var_value[0] if isinstance(var_value, tuple) else None
-    
-                    if is_list_access:
+                    line = getattr(index_expr, 'line', 0) # Line of the index/key expression
+                    column = getattr(index_expr, 'column', 0) # Column of the index/key expression
+                    parent_line = parent.children[0].line
+                    parent_column = parent.children[0].column
+
+                    # Handle Parameter/Get/Unknown types permissively for access
+                    if var_type in ["parameter", "get", "unknown"] or str(var_type).startswith("g"):
+                        if is_list_access:
+                            # Assume list access on these types might yield something, return unknown
+                            print(f"Permitting list access on '{var_name}' (type {var_type}) - result type unknown.")
+                            result = ("unknown", None)
+                        else: # Group access
+                            # Assume group access on these types might yield something, return unknown
+                            print(f"Permitting group access on '{var_name}' (type {var_type}) - result type unknown.")
+                            result = ("unknown", None)
+                    elif is_list_access:
                         # Handle text indexing
                         if var_type == "text":
-                            # Text character indexing
                             text_value = var_value[1]
                             if key_value[0] == "integer":
                                 idx = key_value[1]
-                                # Handle negative indices for text
-                                if idx < 0:
-                                    # Convert negative index to positive
-                                    idx = len(text_value) + idx
-                                if idx < 0 or idx >= len(text_value):
-                                    # Get more accurate line and column information
-                                    line = getattr(index_expr, 'line', 0)
-                                    column = getattr(index_expr, 'column', 0)
+                                if idx < 0: idx = len(text_value) + idx # Handle negative indices
+                                if 0 <= idx < len(text_value):
+                                    result = ("text", text_value[idx])
+                                else:
                                     self.errors.append(SemanticError(
-                                        f"Text index {key_value[1]} out of range for variable '{var_name}'", 
+                                        f"Text index {key_value[1]} out of range for variable '{var_name}' (length {len(text_value)})",
                                         line, column))
                                     result = ("unknown", None)
-                                else:
-                                    # Return the character at the specified index as a text type
-                                    result = ("text", text_value[idx])
-                                self.values[id(node)] = result
-                                return result
+                            else:
+                                 self.errors.append(SemanticError(
+                                     f"Text index for '{var_name}' must be an integer, got {key_value[0]}",
+                                     line, column))
+                                 result = ("unknown", None)
                         elif var_type == "list":
-                            # List index lookup
                             list_items = var_value[1]
                             if key_value[0] == "integer":
                                 idx = key_value[1]
-                                # Handle negative indices for lists
-                                if idx < 0:
-                                    # Convert negative index to positive
-                                    idx = len(list_items) + idx
-                                if idx < 0 or idx >= len(list_items):
-                                    # Get more accurate line and column information
-                                    line = getattr(index_expr, 'line', 0)
-                                    column = getattr(index_expr, 'column', 0)
+                                if idx < 0: idx = len(list_items) + idx # Handle negative indices
+                                if 0 <= idx < len(list_items):
+                                    result = list_items[idx] # Return the actual element
+                                else:
                                     self.errors.append(ListIndexOutOfRangeError(
                                         var_name, key_value[1], line, column))
                                     result = ("unknown", None)
-                                else:
-                                    # Return the actual element at the adjusted index
-                                    result = list_items[idx]
-                                self.values[id(node)] = result
-                                return result
-                        elif var_type != "list":
+                            else:
+                                self.errors.append(SemanticError(
+                                    f"List index for '{var_name}' must be an integer, got {key_value[0]}",
+                                    line, column))
+                                result = ("unknown", None)
+                        else: # Not list, text, or parameter/get/unknown
                             self.errors.append(InvalidListAccessError(
-                                var_name, parent.children[0].line, parent.children[0].column))
-                    else:  # Group access
-                        # Existing group access logic remains unchanged
-                        if var_type != "group":
-                            self.errors.append(InvalidGroupAccessError(
-                                var_name, parent.children[0].line, parent.children[0].column))
-                        else:
-                            # For a group, look up the key in the group members
+                                var_name, parent_line, parent_column))
+                            result = ("unknown", None)
+                    else:  # Group access { }
+                        if var_type == "group":
                             group_members = var_value[1]  # List of (key, value) pairs
-                            result = None
                             found = False
-    
                             for k, v in group_members:
-                                # Compare key types and values
                                 if k[0] == key_value[0] and k[1] == key_value[1]:
                                     result = v
                                     found = True
                                     break
-    
                             if not found:
-                                # Get more accurate line and column information
-                                line = getattr(index_expr, 'line', 0)
-                                column = getattr(index_expr, 'column', 0)
                                 self.errors.append(SemanticError(
                                     f"Key '{key_value[1]}' not found in group '{var_name}'",
                                     line, column))
                                 result = ("unknown", None)
-                            
-                            self.values[id(node)] = result
-                            return result
-        # In case of missing parent or variable, return the evaluated key.
-        self.values[id(node)] = key_value
-        return key_value
+                        else: # Not group or parameter/get/unknown
+                            self.errors.append(InvalidGroupAccessError(
+                                var_name, parent_line, parent_column))
+                            result = ("unknown", None)
 
+        self.values[id(node)] = result
+        return result
 
-    # In visit_group_declaration, replace the group declaration block with the following:
-    
     def visit_group_declaration(self, node):
         ident = node.children[1]
         line = ident.line
@@ -2103,9 +2154,7 @@ class SemanticAnalyzer(Visitor):
             # key and value are tuples like ("integer", 2) or ("text", "pair")
             print(f"{key[1]} ({key[0]}) : {value[1]} ({value[0]})")
         return
-    
-    # Now update visit_group_members to accept an extra parameter for the members list:
-    
+
     def visit_group_members(self, node, group_data, group_members):
         if not node or not hasattr(node, 'children'):
             return
@@ -2137,9 +2186,7 @@ class SemanticAnalyzer(Visitor):
         if len(node.children) > 3 and node.children[3]:
             self.visit_member_tail(node.children[3], group_data, group_members)
         return
-    
-    # Finally update visit_member_tail accordingly:
-    
+
     def visit_member_tail(self, node, group_data, group_members):
         if not node or not hasattr(node, 'children') or len(node.children) < 2:
             return
@@ -2167,34 +2214,130 @@ class SemanticAnalyzer(Visitor):
         
     # Visit each loop in functions
     def visit_each_func_statement(self, node):
+        # Keep analysis logic similar to visit_each_statement
+        self.visit(node.children[2]) # init
+        condition_expr = node.children[3]
+        self.check_boolean_expr(condition_expr, "each loop condition")
+        self.visit(condition_expr)
+        self.visit(node.children[5]) # increment
+        self.push_scope()
+        self.enter_loop()
+        self.visit(node.children[7]) # func_loop_block
+        self.exit_loop()
+        self.pop_scope()
         return None
         
     def visit_repeat_func_statement(self, node):
+        # Keep analysis logic similar to visit_repeat_statement
+        condition_expr = node.children[2]
+        self.check_boolean_expr(condition_expr, "repeat loop condition")
+        self.visit(condition_expr)
+        self.push_scope()
+        self.enter_loop()
+        self.visit(node.children[4]) # func_loop_block
+        self.exit_loop()
+        self.pop_scope()
         return None
         
     def visit_do_repeat_func_statement(self, node):
+        # Keep analysis logic similar to visit_do_repeat_statement
+        self.push_scope()
+        self.enter_loop()
+        self.visit(node.children[2]) # func_loop_block
+        condition_expr = node.children[6]
+        self.check_boolean_expr(condition_expr, "do-repeat loop condition")
+        self.visit(condition_expr)
+        self.exit_loop()
+        self.pop_scope()
         return None
         
     def visit_func_loop_block(self, node):
+        # Visit children like visit_loop_block
+        for child in node.children:
+            self.visit(child)
         return None
         
-    # Handle conditional statements in loop contexts
-    def visit_loop_checkif_statement(self, node):
-        # Similar to visit_checkif_statement but in a loop context
+    def visit_func_checkif_statement(self, node):
+        # Keep analysis logic similar to visit_checkif_statement
         condition_expr = node.children[2]
         self.check_boolean_expr(condition_expr, "checkif condition")
         self.visit(condition_expr)
-        
         self.push_scope()
-        self.visit(node.children[5])  # loop_block
+        self.visit(node.children[5]) # function_prog
         self.pop_scope()
-        
         for child in node.children[6:]:
-            if child and hasattr(child, 'data'):
-                self.visit(child)
+             if child and hasattr(child, 'data'):
+                 self.visit(child)
         return None
         
-    def visit_loop_recheck_statement(self, node):
+    def visit_func_recheck_statement(self, node):
+        # Keep analysis logic similar to visit_recheck_statement
+        if len(node.children) < 7: return None
+        condition_expr = node.children[2]
+        self.check_boolean_expr(condition_expr, "recheck condition")
+        self.visit(condition_expr)
+        self.push_scope()
+        self.visit(node.children[5]) # function_prog
+        self.pop_scope()
+        if len(node.children) > 7 and node.children[7]:
+            self.visit(node.children[7])
+        return None
+        
+    def visit_func_otherwise_statement(self, node):
+        # Keep analysis logic similar to visit_otherwise_statement
+        if len(node.children) < 3: return None
+        self.push_scope()
+        self.visit(node.children[2]) # function_prog
+        self.pop_scope()
+        return None
+        
+    def visit_func_switch_statement(self, node):
+        # Keep analysis logic similar to visit_switch_statement
+        self.visit(node.children[2]) # expression
+        self.push_scope()
+        self.enter_switch()
+        case_values = set()
+        # Process first case
+        case_value = self.get_value(node.children[6])
+        if case_value and case_value[0] != "unknown": case_values.add(str(case_value))
+        self.visit(node.children[8]) # function_prog
+        # Process tail and default
+        if len(node.children) > 9 and node.children[9]: self.visit_func_case_tail(node.children[9], case_values)
+        if len(node.children) > 10 and node.children[10]: self.visit(node.children[10]) # func_switch_default
+        self.exit_switch()
+        self.pop_scope()
+        return None
+        
+    def visit_func_case_tail(self, node, case_values):
+        # Keep analysis logic similar to visit_case_values
+        if not node or not hasattr(node, 'children') or len(node.children) < 2: return
+        case_value = self.get_value(node.children[1])
+        if case_value and case_value[0] != "unknown":
+            str_val = str(case_value)
+            if str_val in case_values:
+                 line, column = getattr(node.children[1], 'line', 0), getattr(node.children[1], 'column', 0)
+                 self.errors.append(SemanticError(f"Duplicate case value: {case_value[1]}", line, column))
+            else: case_values.add(str_val)
+        if len(node.children) >= 4: self.visit(node.children[3]) # function_prog
+        if len(node.children) > 4 and node.children[4]: self.visit_func_case_tail(node.children[4], case_values)
+        return
+
+    # Remove 'return' from func_loop conditional/switch visitors as well if they exist
+    # e.g., visit_func_loop_checkif_statement should analyze its body
+    def visit_func_loop_checkif_statement(self, node):
+        # Keep analysis logic similar to visit_loop_checkif_statement
+        condition_expr = node.children[2]
+        self.check_boolean_expr(condition_expr, "checkif condition")
+        self.visit(condition_expr)
+        self.push_scope()
+        self.visit(node.children[5]) # func_loop_block
+        self.pop_scope()
+        for child in node.children[6:]:
+             if child and hasattr(child, 'data'):
+                 self.visit(child)
+        return None
+        
+    def visit_func_loop_recheck_statement(self, node):
         # Similar to visit_recheck_statement but in a loop context
         if not node or not hasattr(node, 'children') or len(node.children) < 7:
             return None
@@ -2211,7 +2354,7 @@ class SemanticAnalyzer(Visitor):
             self.visit(node.children[7])
         return None
         
-    def visit_loop_otherwise_statement(self, node):
+    def visit_func_loop_otherwise_statement(self, node):
         # Similar to visit_otherwise_statement but in a loop context
         if not node or not hasattr(node, 'children') or len(node.children) < 3:
             return None
@@ -2221,7 +2364,7 @@ class SemanticAnalyzer(Visitor):
         self.pop_scope()
         return None
         
-    def visit_loop_switch_statement(self, node):
+    def visit_func_loop_switch_statement(self, node):
         # Similar to visit_switch_statement but in a loop context
         self.visit(node.children[2])  # expression
         
@@ -2269,37 +2412,153 @@ class SemanticAnalyzer(Visitor):
 
     # Handle conditional statements in function contexts
     def visit_func_checkif_statement(self, node):
-        # Skip checking inside function bodies
+        # Keep analysis logic similar to visit_checkif_statement
+        condition_expr = node.children[2]
+        self.check_boolean_expr(condition_expr, "checkif condition")
+        self.visit(condition_expr)
+        self.push_scope()
+        self.visit(node.children[5]) # function_prog
+        self.pop_scope()
+        for child in node.children[6:]:
+             if child and hasattr(child, 'data'):
+                 self.visit(child)
         return None
             
     def visit_func_recheck_statement(self, node):
-        # Skip checking inside function bodies
+        # Keep analysis logic similar to visit_recheck_statement
+        if len(node.children) < 7: return None
+        condition_expr = node.children[2]
+        self.check_boolean_expr(condition_expr, "recheck condition")
+        self.visit(condition_expr)
+        self.push_scope()
+        self.visit(node.children[5]) # function_prog
+        self.pop_scope()
+        if len(node.children) > 7 and node.children[7]:
+            self.visit(node.children[7])
         return None
             
     def visit_func_otherwise_statement(self, node):
-        # Skip checking inside function bodies
+        # Keep analysis logic similar to visit_otherwise_statement
+        if len(node.children) < 3: return None
+        self.push_scope()
+        self.visit(node.children[2]) # function_prog
+        self.pop_scope()
         return None
             
     def visit_func_switch_statement(self, node):
-        # Skip checking inside function bodies
+        # Keep analysis logic similar to visit_switch_statement
+        self.visit(node.children[2]) # expression
+        self.push_scope()
+        self.enter_switch()
+        case_values = set()
+        # Process first case
+        case_value = self.get_value(node.children[6])
+        if case_value and case_value[0] != "unknown": case_values.add(str(case_value))
+        self.visit(node.children[8]) # function_prog
+        # Process tail and default
+        if len(node.children) > 9 and node.children[9]: self.visit_func_case_tail(node.children[9], case_values)
+        if len(node.children) > 10 and node.children[10]: self.visit(node.children[10]) # func_switch_default
+        self.exit_switch()
+        self.pop_scope()
         return None
             
     def visit_func_case_tail(self, node, case_values=None):
-        # Skip checking inside function bodies
-        return None
+        # Keep analysis logic similar to visit_case_values
+        if not node or not hasattr(node, 'children') or len(node.children) < 2: return
+        case_value = self.get_value(node.children[1])
+        if case_value and case_value[0] != "unknown":
+            str_val = str(case_value)
+            if str_val in case_values:
+                 line, column = getattr(node.children[1], 'line', 0), getattr(node.children[1], 'column', 0)
+                 self.errors.append(SemanticError(f"Duplicate case value: {case_value[1]}", line, column))
+            else: case_values.add(str_val)
+        if len(node.children) >= 4: self.visit(node.children[3]) # function_prog
+        if len(node.children) > 4 and node.children[4]: self.visit_func_case_tail(node.children[4], case_values)
+        return
         
     # Handle conditional statements in function+loop contexts    
     def visit_func_loop_checkif_statement(self, node):
+        # Keep analysis logic similar to visit_loop_checkif_statement
+        condition_expr = node.children[2]
+        self.check_boolean_expr(condition_expr, "checkif condition")
+        self.visit(condition_expr)
+        self.push_scope()
+        self.visit(node.children[5]) # func_loop_block
+        self.pop_scope()
+        for child in node.children[6:]:
+             if child and hasattr(child, 'data'):
+                 self.visit(child)
         return None
         
     def visit_func_loop_recheck_statement(self, node):
+        # Similar to visit_recheck_statement but in a loop context
+        if not node or not hasattr(node, 'children') or len(node.children) < 7:
+            return None
+            
+        condition_expr = node.children[2]
+        self.check_boolean_expr(condition_expr, "recheck condition")
+        self.visit(condition_expr)
+        
+        self.push_scope()
+        self.visit(node.children[5])  # loop_block
+        self.pop_scope()
+        
+        if len(node.children) > 7 and node.children[7]:
+            self.visit(node.children[7])
         return None
         
     def visit_func_loop_otherwise_statement(self, node):
+        # Similar to visit_otherwise_statement but in a loop context
+        if not node or not hasattr(node, 'children') or len(node.children) < 3:
+            return None
+        
+        self.push_scope()
+        self.visit(node.children[2])  # loop_block
+        self.pop_scope()
         return None
         
     def visit_func_loop_switch_statement(self, node):
+        # Similar to visit_switch_statement but in a loop context
+        self.visit(node.children[2])  # expression
+        
+        self.push_scope()
+        self.enter_switch()
+        
+        case_values = set()
+        case_value = self.get_value(node.children[6])
+        if case_value and case_value[0] != "unknown":
+            case_values.add(str(case_value))
+        
+        self.visit(node.children[8])  # loop_block
+        
+        if len(node.children) > 9 and node.children[9]:
+            self.visit_case_tail_loop(node.children[9], case_values)
+        
+        if len(node.children) > 10 and node.children[10]:
+            self.visit(node.children[10])  # loop_switch_default
+        
+        self.exit_switch()
+        self.pop_scope()
         return None
         
     def visit_func_loop_case_tail(self, node, case_values):
+        # Similar to visit_case_values but for loop context
+        if not node or not hasattr(node, 'children'):
+            return
+        
+        case_value = self.get_value(node.children[1])
+        if case_value and case_value[0] != "unknown":
+            str_val = str(case_value)
+            if str_val in case_values:
+                line = getattr(node.children[1], 'line', 0)
+                column = getattr(node.children[1], 'column', 0)
+                self.errors.append(SemanticError(
+                    f"Duplicate case value: {case_value[1]}", line, column))
+            else:
+                case_values.add(str_val)
+        
+        self.visit(node.children[3])  # loop_block
+        
+        if len(node.children) > 4 and node.children[4]:
+            self.visit_case_tail_loop(node.children[4], case_values)
         return

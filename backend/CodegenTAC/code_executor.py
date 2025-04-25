@@ -11,6 +11,50 @@ import traceback
 # Store execution states
 execution_states = {}
 
+def format_minima_number(value):
+    """
+    Format a number for output according to Minima language rules.
+    - Use tilde (~) for negative numbers
+    - Limit decimal places to maximum of 9 digits
+    - Ensure integers are within ~999999999 to 999999999
+    """
+    if not isinstance(value, (int, float)):
+        return value
+    
+    # Convert to integer if it's a whole number
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    
+    # Handle negative numbers with tilde
+    if value < 0:
+        # Format floats with limited decimal precision
+        if isinstance(value, float):
+            # Convert to string with max 9 decimal places
+            formatted = f"~{abs(value):.9f}".rstrip('0').rstrip('.')
+            # Ensure there are at most 9 decimal digits
+            parts = formatted.split('.')
+            if len(parts) > 1 and len(parts[1]) > 9:
+                parts[1] = parts[1][:9]
+                formatted = f"~{parts[0]}.{parts[1]}"
+            return formatted
+        else:
+            # For integers
+            return f"~{abs(value)}"
+    else:
+        # Format positive floats with limited decimal precision
+        if isinstance(value, float):
+            # Convert to string with max 9 decimal places
+            formatted = f"{value:.9f}".rstrip('0').rstrip('.')
+            # Ensure there are at most 9 decimal digits
+            parts = formatted.split('.')
+            if len(parts) > 1 and len(parts[1]) > 9:
+                parts[1] = parts[1][:9]
+                formatted = f"{parts[0]}.{parts[1]}"
+            return formatted
+        else:
+            # For integers
+            return str(value)
+
 def format_minima_output(output_text):
     """
     Ensure all negative numbers in output are displayed with tilde notation.
@@ -18,10 +62,20 @@ def format_minima_output(output_text):
     """
     import re
     
-    # Replace minus signs with tildes in numeric output
-    # Careful not to replace minus signs in other contexts
-    # This regex looks for minus signs followed by digits
-    formatted_text = re.sub(r'-(\d+(\.\d+)?)', r'~\1', output_text)
+    # Replace minus signs with tildes in numeric output - improved regex for better precision
+    def replace_negatives(match):
+        number = match.group(1)
+        if '.' in number:  # It's a float
+            # Limit decimal places to 9 and format with tilde
+            parts = number.split('.')
+            if len(parts) > 1 and len(parts[1]) > 9:
+                parts[1] = parts[1][:9]
+            return f"~{parts[0]}.{parts[1]}" if len(parts) > 1 else f"~{parts[0]}"
+        else:  # It's an integer
+            return f"~{number}"
+    
+    # This regex matches negative numbers more precisely
+    formatted_text = re.sub(r'-(\d+(\.\d+)?)', replace_negatives, output_text)
     
     return formatted_text
 
