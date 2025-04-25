@@ -213,36 +213,13 @@ class TACInterpreter:
                 self.ip += 1
         return self.output_buffer.getvalue()
     def resume_with_input(self, user_input):
-        """Resume execution after receiving user input with strict number validation."""
+        """Resume execution after receiving user input with all inputs treated as strings."""
         if not self.waiting_for_input:
             raise ValueError("Interpreter is not waiting for input")
-        try:
-            if user_input.startswith('~') and len(user_input) > 1:
-                num_str = user_input[1:]
-                parts = num_str.split('.')
-                if len(parts[0]) > self.max_digits:
-                    raise ValueError(f"Input integer part has {len(parts[0])} digits. Maximum {self.max_digits} digits allowed.")
-                if len(parts) > 1 and len(parts[1]) > self.max_digits:
-                    raise ValueError(f"Input decimal part has {len(parts[1])} digits. Maximum {self.max_digits} digits allowed.")
-                if '.' in num_str:
-                    input_val = -float(num_str)
-                else:
-                    input_val = -int(num_str)
-            else:
-                parts = user_input.split('.')
-                if len(parts[0]) > self.max_digits:
-                    raise ValueError(f"Input integer part has {len(parts[0])} digits. Maximum {self.max_digits} digits allowed.")
-                if len(parts) > 1 and len(parts[1]) > self.max_digits:
-                    raise ValueError(f"Input decimal part has {len(parts[1])} digits. Maximum {self.max_digits} digits allowed.")
-                if '.' in user_input:
-                    input_val = float(user_input)
-                else:
-                    input_val = int(user_input)
-            input_val = self.validate_number(input_val)
-        except ValueError as e:
-            if "digits" in str(e) or "out of range" in str(e):
-                raise e  
-            input_val = user_input
+        
+        # Always treat input as string, no automatic conversion
+        input_val = str(user_input)
+        
         self.memory[self.input_result_var] = input_val
         self.waiting_for_input = False
         self.input_prompt = ""
@@ -403,7 +380,7 @@ class TACInterpreter:
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
             
-            # Case 1: List concatenation - when either operand is a list
+            # Case 1: List concatenation - remains the same
             if isinstance(left_val, list) or isinstance(right_val, list):
                 # Convert non-list operands to single-item lists
                 if not isinstance(left_val, list):
@@ -424,57 +401,54 @@ class TACInterpreter:
                         if var_name in self.memory:
                             processed_right.append(self.memory[var_name])
                         else:
-                            processed_right.append(var_name)
+                            processed_right.append(var_name) # Keep unresolved var name? Or None? Let's keep name for now.
                     else:
                         processed_right.append(item)
                         
                 # Create the concatenated list
                 self.memory[result] = left_list + processed_right
-                return
+                return # Exit after handling list concatenation
                 
             # Case 2: String concatenation or numeric addition
-            left_is_string = isinstance(left_val, str) and not (
-                left_val.isdigit() or 
-                (len(left_val) > 0 and left_val[0] == '-' and left_val[1:].isdigit()) or
-                (len(left_val) > 0 and left_val[0] == '~' and left_val[1:].isdigit())
-            )
-            
-            right_is_string = isinstance(right_val, str) and not (
-                right_val.isdigit() or 
-                (len(right_val) > 0 and right_val[0] == '-' and right_val[1:].isdigit()) or
-                (len(right_val) > 0 and right_val[0] == '~' and right_val[1:].isdigit())
-            )
-            
-            if left_is_string or right_is_string:
-                # String concatenation
-                if isinstance(left_val, bool):
-                    str_left = "YES" if left_val else "NO"
-                else:
-                    str_left = "" if left_val is None else str(left_val)
-                    
-                if isinstance(right_val, bool):
-                    str_right = "YES" if right_val else "NO"
-                else:
-                    str_right = "" if right_val is None else str(right_val)
-                    
+            # Prioritize string concatenation if EITHER operand is a string instance
+            is_left_str = isinstance(left_val, str)
+            is_right_str = isinstance(right_val, str)
+
+            if is_left_str or is_right_str:
+                # Perform string concatenation
+                # Convert bools to "YES"/"NO", None to ""
+                str_left = "YES" if isinstance(left_val, bool) and left_val else "NO" if isinstance(left_val, bool) and not left_val else str(left_val or "")
+                str_right = "YES" if isinstance(right_val, bool) and right_val else "NO" if isinstance(right_val, bool) and not right_val else str(right_val or "")
+                
                 self.memory[result] = str_left + str_right
             else:
-                # Numeric addition
+                # Perform numeric addition (only if NEITHER operand is a string)
                 try:
-                    # Convert to appropriate numeric types
-                    left_num = float(left_val) if isinstance(left_val, float) or (isinstance(left_val, str) and '.' in left_val) else int(left_val)
-                    right_num = float(right_val) if isinstance(right_val, float) or (isinstance(right_val, str) and '.' in right_val) else int(right_val)
+                    # Helper to convert to number, treating bool as 1/0 and None as 0
+                    def to_num(val):
+                        if isinstance(val, (int, float)):
+                            return val
+                        if isinstance(val, bool):
+                            return 1 if val else 0
+                        if val is None: # Handle 'empty'
+                            return 0 
+                        # This part should ideally not be reached if it's not a string
+                        raise TypeError(f"Cannot convert {val} (type {type(val).__name__}) to number for addition")
+
+                    left_num = to_num(left_val)
+                    right_num = to_num(right_val)
                     
-                    # Perform addition
                     computed_result = left_num + right_num
                     
-                    # Validate the result
+                    # Validate the result according to Minima's rules
                     self.memory[result] = self.validate_number(computed_result)
-                except ValueError as e:
+                except (ValueError, TypeError) as e:
+                    # Handle validation errors or conversion TypeErrors
                     if "out of range" in str(e) or "too many digits" in str(e):
-                        raise e
-                    # If not a number, fall back to string concatenation
-                    self.memory[result] = str(left_val) + str(right_val)
+                        raise e # Re-raise validation errors
+                    else:
+                         # Raise a more specific error if conversion/addition failed unexpectedly
+                         raise TypeError(f"Error during numeric addition for '{arg1}' ({type(left_val).__name__}) and '{arg2}' ({type(right_val).__name__}): {e}")
         elif op == 'LIST_EXTEND':
             list_var = self.resolve_variable(arg1)
             extension = self.resolve_variable(arg2)

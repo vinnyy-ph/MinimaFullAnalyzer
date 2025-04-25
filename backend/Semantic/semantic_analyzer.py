@@ -981,12 +981,12 @@ class SemanticAnalyzer(Visitor):
                         list_value = var_value[1]  
                         # MODIFIED: Be more permissive about list index validation
                         # Allow reasonable indices even if the list is currently empty
-                        if index < 0 or index > 100:  # Only warn about very large negative indices or unreasonably large ones
-                            line = getattr(index_expr_node, 'line', 0)
-                            column = getattr(index_expr_node, 'column', 0)
-                            self.errors.append(SemanticError(
-                                f"Warning: List index {index} may be out of range for variable '{name}'",
-                                line, column))
+                        # if index < 0 or index > 100:  # Only warn about very large negative indices or unreasonably large ones
+                        #     line = getattr(index_expr_node, 'line', 0)
+                        #     column = getattr(index_expr_node, 'column', 0)
+                        #     self.errors.append(SemanticError(
+                        #         f"Warning: List index {index} may be out of range for variable '{name}'",
+                        #         line, column))
                         
                         # For accessing/modifying the list element
                         current_element = ("unknown", None)
@@ -1545,10 +1545,10 @@ class SemanticAnalyzer(Visitor):
                                 # MODIFIED: Allow accessing list elements that might be dynamically created
                                 # Only warn about out-of-range accesses for larger indices that are likely errors
                                 # This allows accessing indexes 0, 1, etc. even if the list is initially empty
-                                if idx < 0 or idx > 100:  # Allow reasonable indices, protect against very large ones
-                                    self.errors.append(SemanticError(
-                                        f"Warning: List index {key_value[1]} may be out of range for variable '{var_name}'",
-                                        line, column))
+                                # if idx < 0 or idx > 100:  # Allow reasonable indices, protect against very large ones
+                                #     self.errors.append(SemanticError(
+                                #         f"Warning: List index {key_value[1]} may be out of range for variable '{var_name}'",
+                                #         line, column))
                                 
                                 # Return a result of unknown type to allow the code to proceed
                                 if 0 <= idx < len(list_items):

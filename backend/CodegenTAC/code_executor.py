@@ -80,8 +80,9 @@ def execute_code(code, execution_id=None, user_input=None):
     if execution_id and execution_id in execution_states:
         interpreter, state = execution_states.pop(execution_id)
         try:
-            if isinstance(user_input, str) and user_input.startswith('~'):
-                pass
+            # Ensure user_input is always a string - remove any automatic conversion
+            if user_input is not None:
+                user_input = str(user_input)
             output = interpreter.resume_with_input(user_input)
             results['success'] = True
             results['output'] = format_minima_output(output)  
