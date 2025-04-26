@@ -25,7 +25,8 @@ export const fetchBuiltinFunctions = async () => {
       cachedBuiltinFunctions = [
         'length', 'uppercase', 'lowercase', 'max', 'min', 'sorted', 
         'reverse', 'abs', 'sum', 'contains', 'indexOf', 'join', 
-        'slice', 'unique', 'type'
+        'slice', 'unique', 'type', 'toString', 'toList',
+        'isqrt', 'pow', 'factorial', 'ceil', 'floor', 'round'
       ];
     }
   }

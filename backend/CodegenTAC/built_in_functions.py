@@ -85,6 +85,36 @@ class MinimaBultins:
             'return_type': 'list',
             'implementation': lambda interpreter, args: MinimaBultins._toList(interpreter, args)
         },
+        'isqrt': {
+            'params': 1,
+            'return_type': 'integer',
+            'implementation': lambda interpreter, args: MinimaBultins._isqrt(interpreter, args)
+        },
+        'pow': {
+            'params': 2,
+            'return_type': 'unknown',
+            'implementation': lambda interpreter, args: MinimaBultins._pow(interpreter, args)
+        },
+        'factorial': {
+            'params': 1,
+            'return_type': 'integer',
+            'implementation': lambda interpreter, args: MinimaBultins._factorial(interpreter, args)
+        },
+        'ceil': {
+            'params': 1,
+            'return_type': 'integer',
+            'implementation': lambda interpreter, args: MinimaBultins._ceil(interpreter, args)
+        },
+        'floor': {
+            'params': 1,
+            'return_type': 'integer',
+            'implementation': lambda interpreter, args: MinimaBultins._floor(interpreter, args)
+        },
+        'round': {
+            'params': -1,  # -1 indicates variable arguments (1 or 2 parameters)
+            'return_type': 'unknown',
+            'implementation': lambda interpreter, args: MinimaBultins._round(interpreter, args)
+        },
     }
     
     @staticmethod
@@ -404,7 +434,7 @@ class MinimaBultins:
         elif isinstance(collection, str):
             return collection[start:end]
         else:
-            raise ValueError(f"First argument of slice() must be a list or text: {collection}")
+            raise ValueValueError(f"First argument of slice() must be a list or text: {collection}")
     
     @staticmethod
     def _unique(interpreter, args):
@@ -423,7 +453,7 @@ class MinimaBultins:
             # For strings, return list of unique characters
             return list(dict.fromkeys(value))
         else:
-            raise ValueError(f"unique() argument must be a list or text: {value}")
+            raise ValueValueError(f"unique() argument must be a list or text: {value}")
         
     @staticmethod
     def _type(interpreter, args):
@@ -479,3 +509,143 @@ class MinimaBultins:
         else:
             # Convert to string first, then to list
             return list(str(value))
+    
+    @staticmethod
+    def _isqrt(interpreter, args):
+        """
+        Minima's isqrt() function
+        Returns the integer square root of a number (largest integer i such that i*i ≤ n)
+        """
+        if not args:
+            raise ValueError("isqrt() requires 1 argument")
+        
+        value = args[0]
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"isqrt() argument must be a number: {value}")
+            
+        if value < 0:
+            raise ValueError(f"isqrt() cannot compute square root of negative number: {value}")
+            
+        # Convert to integer and use integer square root algorithm
+        import math
+        return int(math.isqrt(int(value))) if isinstance(value, int) else int(math.sqrt(value))
+    
+    @staticmethod
+    def _pow(interpreter, args):
+        """
+        Minima's pow() function
+        Raises first argument to the power of the second argument
+        """
+        if len(args) != 2:
+            raise ValueError("pow() requires 2 arguments: base and exponent")
+        
+        base = args[0]
+        exponent = args[1]
+        
+        if not isinstance(base, (int, float)):
+            raise ValueError(f"First argument of pow() must be a number: {base}")
+            
+        if not isinstance(exponent, (int, float)):
+            raise ValueError(f"Second argument of pow() must be a number: {exponent}")
+        
+        try:
+            result = base ** exponent
+            # Validate the result fits within Minima's range
+            return interpreter.validate_number(result)
+        except OverflowError:
+            raise ValueError(f"pow() result is too large: {base}^{exponent}")
+    
+    @staticmethod
+    def _factorial(interpreter, args):
+        """
+        Minima's factorial() function
+        Returns the factorial of a non-negative integer
+        """
+        if not args:
+            raise ValueError("factorial() requires 1 argument")
+        
+        value = args[0]
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"factorial() argument must be a number: {value}")
+            
+        if isinstance(value, float) and not value.is_integer():
+            raise ValueError(f"factorial() argument must be an integer: {value}")
+            
+        n = int(value)
+        if n < 0:
+            raise ValueError(f"factorial() argument must be non-negative: {n}")
+            
+        if n > 20:  # Safeguard against extremely large factorials
+            raise ValueError(f"factorial() argument is too large: {n}")
+        
+        result = 1
+        for i in range(2, n + 1):
+            result *= i
+            
+        # Validate the result fits within Minima's range
+        return interpreter.validate_number(result)
+    
+    @staticmethod
+    def _ceil(interpreter, args):
+        """
+        Minima's ceil() function
+        Returns the smallest integer greater than or equal to the argument
+        """
+        if not args:
+            raise ValueError("ceil() requires 1 argument")
+        
+        value = args[0]
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"ceil() argument must be a number: {value}")
+            
+        import math
+        return math.ceil(value)
+    
+    @staticmethod
+    def _floor(interpreter, args):
+        """
+        Minima's floor() function
+        Returns the largest integer less than or equal to the argument
+        """
+        if not args:
+            raise ValueError("floor() requires 1 argument")
+        
+        value = args[0]
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"floor() argument must be a number: {value}")
+            
+        import math
+        return math.floor(value)
+    
+    @staticmethod
+    def _round(interpreter, args):
+        """
+        Minima's round() function
+        Rounds a number to the nearest integer or to specified decimal places
+        
+        round(number) - rounds to nearest integer
+        round(number, places) - rounds to specified number of decimal places
+        """
+        if not args or len(args) < 1 or len(args) > 2:
+            raise ValueError("round() requires 1 or 2 arguments: number and optional decimal places")
+        
+        value = args[0]
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"First argument of round() must be a number: {value}")
+        
+        decimal_places = 0
+        if len(args) == 2:
+            places = args[1]
+            if not isinstance(places, int):
+                raise ValueError(f"Second argument of round() must be an integer: {places}")
+            decimal_places = places
+        
+        # If decimal_places is 0, return an integer
+        if decimal_places == 0:
+            return round(value)
+        
+        # Otherwise, return a point (float) with specified decimal places
+        rounded = round(value, decimal_places)
+        
+        # Ensure the result is within Minima's range
+        return interpreter.validate_number(rounded)

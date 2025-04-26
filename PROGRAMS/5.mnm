@@ -13,14 +13,11 @@
 # show("The geometric sum is: " + text(sum));
 
 func geometricSum(n) {
-  checkif (n < 0) {
-    throw 0; # Or throw an error: "Input must be a non-negative integer."
-  }
-
+  var abs_n = abs(n);      
   var sum = 1; # Initialize the sum with the first term (1/3^0 = 1)
   var denominator = 3; # Start with the denominator each the second term (1/3)
 
-  each (var i = 1; i <= n; i++) {
+  each (var i = 1; i <= abs_n; i++) {
     var term = 1 / denominator; # Calculate the current term
     sum += term; # Add the term to the sum
     denominator *= 3; # Calculate the denominator each the next term
@@ -30,6 +27,6 @@ func geometricSum(n) {
 }
 
 # Example usage:
-var n = integer(get("Enter number: "));
+var n = get("Enter number: ");
 var result = geometricSum(n);
 show(result); # Output the result

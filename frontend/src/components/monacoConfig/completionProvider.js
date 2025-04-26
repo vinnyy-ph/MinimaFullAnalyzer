@@ -39,6 +39,35 @@ export const provideCompletionItems = (monacoInstance) => {
           case 'slice':
             snippet = `${func}(\${1:collection}, \${2:start}, \${3:end})`;
             break;
+          case 'toString':
+            snippet = `${func}(\${1:value})`;
+            break;
+            
+          case 'toList':
+            snippet = `${func}(\${1:text})`;
+            break;
+            
+          case 'isqrt':
+            snippet = `${func}(\${1:number})`;
+            break;
+            
+          case 'pow':
+            snippet = `${func}(\${1:base}, \${2:exponent})`;
+            break;
+            
+          case 'factorial':
+            snippet = `${func}(\${1:n})`;
+            break;
+            
+          case 'ceil':
+          case 'floor':
+            snippet = `${func}(\${1:number})`;
+            break;
+            
+          case 'round':
+            snippet = `${func}(\${1:number}, \${2:decimalPlaces})`;
+            break;
+            
           default:
             snippet = `${func}(\${1:})`;
         }
@@ -314,6 +343,61 @@ export const provideCompletionItems = (monacoInstance) => {
         ],
         returns: { type: 'text', description: 'The type as a text string: "integer", "point", "text", "list", "state", or "empty"' },
         example: 'var t = type(42); // Returns "integer"\nt = type("hello"); // Returns "text"\nt = type([1, 2]); // Returns "list"'
+      },
+      'isqrt': {
+        description: 'Returns the integer square root of a number (largest integer i such that i*i ≤ n).',
+        parameters: [
+          { name: 'number', type: 'integer|point', description: 'A non-negative number' }
+        ],
+        returns: { type: 'integer', description: 'The integer square root' },
+        example: 'var result = isqrt(16); // Returns 4\nresult = isqrt(10); // Returns 3'
+      },
+      
+      'pow': {
+        description: 'Raises a number to the specified power.',
+        parameters: [
+          { name: 'base', type: 'integer|point', description: 'The base number' },
+          { name: 'exponent', type: 'integer|point', description: 'The exponent' }
+        ],
+        returns: { type: 'integer|point', description: 'The result of base^exponent' },
+        example: 'var result = pow(2, 3); // Returns 8\nresult = pow(9, 0.5); // Returns 3'
+      },
+      
+      'factorial': {
+        description: 'Calculates the factorial of a non-negative integer (n!).',
+        parameters: [
+          { name: 'n', type: 'integer', description: 'A non-negative integer (max value: 20)' }
+        ],
+        returns: { type: 'integer', description: 'The factorial of n' },
+        example: 'var result = factorial(5); // Returns 120 (5! = 5*4*3*2*1)'
+      },
+      
+      'ceil': {
+        description: 'Returns the smallest integer greater than or equal to the given number.',
+        parameters: [
+          { name: 'number', type: 'integer|point', description: 'The number to round up' }
+        ],
+        returns: { type: 'integer', description: 'The ceiling value' },
+        example: 'var result = ceil(4.2); // Returns 5\nresult = ceil(~1.8); // Returns ~1'
+      },
+      
+      'floor': {
+        description: 'Returns the largest integer less than or equal to the given number.',
+        parameters: [
+          { name: 'number', type: 'integer|point', description: 'The number to round down' }
+        ],
+        returns: { type: 'integer', description: 'The floor value' },
+        example: 'var result = floor(4.9); // Returns 4\nresult = floor(~1.2); // Returns ~2'
+      },
+      
+      'round': {
+        description: 'Rounds a number to the nearest integer or specified decimal places.',
+        parameters: [
+          { name: 'number', type: 'integer|point', description: 'The number to round' },
+          { name: 'places', type: 'integer', description: 'Optional: decimal places (default: 0)' }
+        ],
+        returns: { type: 'integer|point', description: 'The rounded number' },
+        example: 'var result = round(4.5); // Returns 5\nresult = round(3.14159, 2); // Returns 3.14'
       }
     };
     
