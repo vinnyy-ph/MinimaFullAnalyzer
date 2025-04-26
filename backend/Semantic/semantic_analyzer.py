@@ -268,9 +268,7 @@ class SemanticAnalyzer(Visitor):
                 return ("state", "NO")  
             else:
                 return ("unknown", None)
-        # Special case: string concatenation with any type
         if op == "+" and (left[0] == "text" or right[0] == "text"):
-            # Convert both sides to string and concatenate
             return ("text", str(left[1]) + str(right[1]))
         if left[0] == "empty" or right[0] == "empty":
             self.errors.append(SemanticError(
@@ -977,21 +975,9 @@ class SemanticAnalyzer(Visitor):
                     if index_expr[0] == "integer":
                         index = index_expr[1]
                         list_value = var_value[1]  
-                        # MODIFIED: Be more permissive about list index validation
-                        # Allow reasonable indices even if the list is currently empty
-                        # if index < 0 or index > 100:  # Only warn about very large negative indices or unreasonably large ones
-                        #     line = getattr(index_expr_node, 'line', 0)
-                        #     column = getattr(index_expr_node, 'column', 0)
-                        #     self.errors.append(SemanticError(
-                        #         f"Warning: List index {index} may be out of range for variable '{name}'",
-                        #         line, column))
-                        
-                        # For accessing/modifying the list element
                         current_element = ("unknown", None)
                         if 0 <= index < len(list_value):
                             current_element = list_value[index]
-                        
-                        # Always proceed with assignment regardless of current list size
                         if op == "=":
                             new_element_value = expr_value
                         else:
@@ -1011,11 +997,8 @@ class SemanticAnalyzer(Visitor):
                                 new_element_value = self.evaluate_binary("/", current_element, expr_value)
                             else:
                                 new_element_value = expr_value  
-                        
-                        # Make sure the list has enough space
                         while len(list_value) <= index:
                             list_value.append(("unknown", None))
-                            
                         list_value[index] = new_element_value
                         scope.variables[name].value = ("list", list_value)
                         print(f"List element at index {index} reassigned to {new_element_value[1]} {new_element_value[0]}")
@@ -1081,24 +1064,17 @@ class SemanticAnalyzer(Visitor):
         line = ident.line
         column = ident.column
         name = ident.value
-        
         if len(children) > 1 and hasattr(children[1], 'data') and children[1].data == "func_call":
-            # Get the function arguments regardless of whether it's built-in or user-defined
             arg_values = self.evaluate_function_args(children[1])
-            
             if name in self.builtin_functions:
                 expected = self.builtin_functions[name]['params']
                 provided = len(arg_values)
-                
-                # Special case for variable argument functions like sorted()
                 if expected == -1:
-                    # For sorted(), valid arg count is 1 or 2
                     if not (1 <= provided <= 2):
                         self.errors.append(ParameterMismatchError(
                             name, "1 to 2", provided, line, column))
-                        result = ("unknown", None)  # Set result for invalid case
+                        result = ("unknown", None)  
                     else:
-                        # Return the appropriate type for the built-in function - this was missing
                         result_type = self.builtin_functions[name]['return_type']
                         result = (result_type, None)
                         print(f"Function call to built-in '{name}' with variable args - result type: {result_type}")
@@ -1107,12 +1083,10 @@ class SemanticAnalyzer(Visitor):
                         name, expected, provided, line, column))
                     result = ("unknown", None)
                 else:
-                    # Return the appropriate type for the built-in function
                     result_type = self.builtin_functions[name]['return_type']
                     result = (result_type, None)
                     print(f"Function call to built-in '{name}' with result type: {result_type}")
             else:
-                # Original code for user-defined functions
                 func_symbol = self.global_scope.lookup_function(name)
                 if func_symbol is None:
                     self.errors.append(FunctionNotDefinedError(name, line, column))
@@ -1194,14 +1168,10 @@ class SemanticAnalyzer(Visitor):
         func_name = func_token.value
         line = func_token.line
         column = func_token.column
-        
-        # Check if the function name conflicts with a built-in
         if func_name in self.builtin_functions:
             self.errors.append(FunctionRedefinedError(
                 f"{func_name} (built-in function)", line, column))
             return
-            
-        # Original code for function definition
         params = []
         params_node = node.children[3]
         if hasattr(params_node, "children"):
@@ -1567,20 +1537,16 @@ class SemanticAnalyzer(Visitor):
                                      line, column))
                                  result = ("unknown", None)
                         elif var_type == "list":
-                            list_items = var_value[1]
+                            list_items = var_value[1] if var_value and len(var_value) > 1 else None
                             if key_value[0] == "integer":
                                 idx = key_value[1]
-                                
-                                # MODIFIED: Allow accessing list elements that might be dynamically created
-                                # Only warn about out-of-range accesses for larger indices that are likely errors
-                                # This allows accessing indexes 0, 1, etc. even if the list is initially empty
-                                # if idx < 0 or idx > 100:  # Allow reasonable indices, protect against very large ones
-                                #     self.errors.append(SemanticError(
-                                #         f"Warning: List index {key_value[1]} may be out of range for variable '{var_name}'",
-                                #         line, column))
-                                
-                                # Return a result of unknown type to allow the code to proceed
-                                if 0 <= idx < len(list_items):
+                                if idx is None:
+                                    print(f"Warning: list index for '{var_name}' is None, treating as runtime value")
+                                    result = ("unknown", None)
+                                elif list_items is None:
+                                    print(f"Warning: list '{var_name}' is None or not initialized, treating as runtime value")
+                                    result = ("unknown", None)
+                                elif 0 <= idx < len(list_items):
                                     result = list_items[idx]
                                 else:
                                     print(f"Permitting potential runtime list access to '{var_name}[{idx}]'")
