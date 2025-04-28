@@ -284,6 +284,11 @@ class MinimaBultins:
             raise ValueError("reverse() requires 1 argument")
         
         value = args[0]
+        
+        # Auto-convert numbers to strings for convenience
+        if isinstance(value, (int, float)):
+            value = str(value)
+        
         if isinstance(value, list):
             # Return a reversed copy of the list
             return list(reversed(value))
