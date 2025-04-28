@@ -75,16 +75,6 @@ class MinimaBultins:
             'return_type': 'text',
             'implementation': lambda interpreter, args: MinimaBultins._type(interpreter, args)
         },
-        'toString': {
-            'params': 1,
-            'return_type': 'text',
-            'implementation': lambda interpreter, args: MinimaBultins._toString(interpreter, args)
-        },
-        'toList': {
-            'params': 1,
-            'return_type': 'list',
-            'implementation': lambda interpreter, args: MinimaBultins._toList(interpreter, args)
-        },
         'isqrt': {
             'params': 1,
             'return_type': 'integer',
@@ -482,34 +472,7 @@ class MinimaBultins:
             return "empty"
         else:
             return "unknown"
-    @staticmethod
-    def _toString(interpreter, args):
-        """
-        Minima's toString() function
-        Converts a list to its string representation
-        """
-        if not args:
-            raise ValueError("toString() requires 1 argument")
-        
-        value = args[0]
-        return str(value)
-    
-    @staticmethod
-    def _toList(interpreter, args):
-        """
-        Minima's toList() function
-        Converts a string to a list of characters
-        """
-        if not args:
-            raise ValueError("toList() requires 1 argument")
-        
-        value = args[0]
-        if isinstance(value, str):
-            return list(value)
-        else:
-            # Convert to string first, then to list
-            return list(str(value))
-    
+
     @staticmethod
     def _isqrt(interpreter, args):
         """

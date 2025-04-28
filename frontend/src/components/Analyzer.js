@@ -122,20 +122,39 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
         console.log("Execute response:", data);
         
         if (data.success) {
+          // 1. Process and display output received in this segment *first*
+          if (data.output && data.output.trim()) {
+            // Since output was cleared, just set it
+            setProgramOutput(data.output);
+          } else if (!data.waitingForInput) {
+             // Only show 'no output' message if execution finished *and* there was no output
+             setProgramOutput('Program executed successfully with no output.');
+          }
+          // If waiting for input and output is empty, programOutput remains empty for now
+
+          // 2. Update TAC Code
+          setTacCode(data.formattedTAC || '');
+          setExecutionError(''); // Clear previous errors on success
+
+          // 3. Handle waiting state *after* processing output
           if (data.waitingForInput) {
-            // Don't set any output message yet when waiting for input
             setWaitingForInput(true);
             setInputPrompt(data.inputPrompt);
             setExecutionId(data.executionId);
           } else {
-            setProgramOutput(data.output || 'Program executed successfully with no output.');
+            // Execution finished completely in this step
+            setWaitingForInput(false);
+            setInputPrompt('');
+            setExecutionId(null);
           }
-          setTacCode(data.formattedTAC || '');
-          setExecutionError('');
         } else {
-          setProgramOutput('');
-          setTacCode(data.formattedTAC || '');
+          // Handle execution failure reported by the backend
+          setProgramOutput(''); // Clear output on error
+          setTacCode(data.formattedTAC || ''); // Show TAC even on error if available
           setExecutionError(data.error || 'An unknown error occurred');
+          setWaitingForInput(false); // Ensure not waiting on error
+          setInputPrompt('');
+          setExecutionId(null);
         }
         
         // Show the terminal output
@@ -148,32 +167,33 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
       .catch((error) => {
         console.error('Error executing code:', error);
         setExecutionError('Failed to connect to the server: ' + error.message);
-        setExecuting(false);
+        // Clear state on connection error
+        setProgramOutput('');
+        setTacCode('');
+        setWaitingForInput(false);
+        setInputPrompt('');
+        setExecutionId(null);
+        setExecuting(false); // Stop loading indicator
       });
   };
  
   // Handle input submission
   const handleInputSubmit = () => {
-    if (!executionId) return;
+    if (!executionId || executing) return; // Prevent multiple submissions
+
+    setExecuting(true); // Indicate processing
     
-    setExecuting(true);
-    
-    // Add the input to the program output with the prompt
-    setProgramOutput((prev) => {
-      if (prev && prev.trim()) {
-        // Only add newline if there's existing content
-        return `${prev}\n${inputPrompt} ${userInput}`;
-      } else {
-        // No newline for first input
-        return `${inputPrompt} ${userInput}`;
-      }
-    });
+    // Temporarily display the submitted input immediately for better UX
+    // Append the prompt and the user's input to the output
+    const submittedText = `${inputPrompt} ${userInput}`;
+    setProgramOutput((prev) => (prev ? `${prev}\n${submittedText}` : submittedText));
     
     console.log(`Submitting input: '${userInput}' for execution ${executionId}`);
     
     // Send the input back to the server
     axios.post('http://localhost:5000/executeCode', {
-      code, // Send the code again for reference
+      // Send code again if backend needs it for context, otherwise remove
+      // code,
       executionId,
       userInput
     })
@@ -182,33 +202,41 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
       console.log("Input response:", data); // Debug log
       
       if (data.success) {
-        // Append new output if there is any
+        // 1. Append new output received in this segment *after* the input
         if (data.output && data.output.trim()) {
+          // Append with a newline separator
           setProgramOutput((prev) => `${prev}\n${data.output}`);
         }
         
-        // Update TAC code
+        // 2. Update TAC code if provided
         if (data.formattedTAC) {
           setTacCode(data.formattedTAC);
         }
         
-        setExecutionError('');
+        setExecutionError(''); // Clear previous errors on success
         
-        // Check if execution is still waiting for more input
+        // 3. Check if execution is still waiting for more input *after* processing output
         if (data.waitingForInput) {
           setWaitingForInput(true);
           setInputPrompt(data.inputPrompt);
-          setExecutionId(data.executionId);
+          setExecutionId(data.executionId); // Update execution ID if necessary (though likely same unless backend changes it)
         } else {
+          // Execution finished completely after this input
           setWaitingForInput(false);
           setInputPrompt('');
           setExecutionId(null);
         }
       } else {
+        // Handle execution failure reported by the backend after input
+        // Output might have been partially updated before error, decide if clear needed
         setExecutionError(data.error || 'An unknown error occurred');
-        setWaitingForInput(false);
+        setWaitingForInput(false); // Ensure not waiting on error
         setInputPrompt('');
         setExecutionId(null);
+        // Optionally update TAC if provided even on error
+        if (data.formattedTAC) {
+          setTacCode(data.formattedTAC);
+        }
       }
       
       // Show the terminal output
@@ -221,10 +249,11 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     .catch((error) => {
       console.error('Error processing input:', error);
       setExecutionError('Failed to process input: ' + error.message);
+      // Reset state on connection error
       setWaitingForInput(false);
       setInputPrompt('');
       setExecutionId(null);
-      setExecuting(false);
+      setExecuting(false); // Stop loading indicator
     });
     
     // Reset input field after submission

@@ -1,5 +1,7 @@
 from backend.CodegenTAC.built_in_functions import MinimaBultins
 from io import StringIO
+import traceback  # Added for detailed error logging
+
 class TACInterpreter:
     def __init__(self):
         self.memory = {}
@@ -17,12 +19,14 @@ class TACInterpreter:
         self.input_prompt = ""
         self.input_result_var = None
         self.steps_executed = 0
-        self.max_execution_steps = 1000  
+        self.max_execution_steps = 10000  # Increased default limit
         self.max_digits = 9
         self.min_number = -999999999
         self.max_number = 999999999
         self.input_expected_type = None  
         self.builtins = MinimaBultins.get_builtin_implementations()
+        self.debug_mode = False  # Set to False for normal operation
+        
     def validate_number(self, value):
         """Validate that a number is within the allowed range."""
         if value is None or not isinstance(value, (int, float)):
@@ -46,6 +50,7 @@ class TACInterpreter:
             if abs(value) > float(self.max_number) + 0.999999999:
                 raise ValueError(f"Float value out of range: {value}. Valid range is ~{self.min_number}.999999999 to {self.max_number}.999999999")
         return value
+
     def format_number_for_output(self, value):
         """Format number for output according to Minima language rules."""
         if not isinstance(value, (int, float)):
@@ -73,12 +78,14 @@ class TACInterpreter:
         else:
             formatted = f"{value:.9f}".rstrip('0').rstrip('.')
             return formatted
+
     def set_execution_limit(self, limit=None):
         """
         Set the maximum execution steps limit.
         Use None to disable the limit entirely.
         """
         self.max_execution_steps = limit
+
     def resolve_variable(self, val):
         """Helper to resolve a variable to its value, handling parameter names properly."""
         if val is None:
@@ -146,6 +153,7 @@ class TACInterpreter:
                 except ValueError:
                     pass
         return val
+
     def reset(self):
         self.memory = {}
         self.functions = {}
@@ -159,6 +167,7 @@ class TACInterpreter:
         self.waiting_for_input = False
         self.input_prompt = ""
         self.input_result_var = None
+
     def load(self, instructions):
         self.reset()
         self.instructions = instructions
@@ -186,6 +195,7 @@ class TACInterpreter:
             print(f"Loaded {len(instructions)} instructions")
             print(f"Labels defined: {list(self.labels.keys())}")
         return self
+
     def get_value(self, arg):
         """Enhanced get_value with better parameter handling"""
         if arg is None:
@@ -203,19 +213,28 @@ class TACInterpreter:
             except (ValueError, AttributeError):
                 pass
         return arg
+
     def run(self):
         """Execute the loaded TAC instructions."""
         self.ip = 0
         self.waiting_for_input = False
         self.steps_executed = 0  
+        self.output_buffer = StringIO()  # Ensure buffer is fresh for a new run
+
+        if self.debug_mode:
+            print("--- Starting New Execution Run ---")
+
         last_ips = []  
         loop_detection_window = 10  
         loop_threshold = 20  
         loop_pattern_count = 0
+        
         while 0 <= self.ip < len(self.instructions):
             if self.max_execution_steps is not None and self.steps_executed >= self.max_execution_steps:
-                print(f"Execution terminated after {self.steps_executed} steps to prevent infinite loop.")
+                print(f"Execution terminated after {self.steps_executed} steps (max limit: {self.max_execution_steps}).")
+                self.output_buffer.write(f"\n[Execution stopped: Max steps ({self.max_execution_steps}) reached]\n")
                 break
+                
             op, arg1, arg2, result = self.instructions[self.ip]
             last_ips.append(self.ip)
             if len(last_ips) > loop_detection_window:
@@ -233,153 +252,200 @@ class TACInterpreter:
                                 if self.debug_mode:
                                     print(f"DETECTED AND FIXED INFINITE LOOP: Decremented i to {self.memory['i']}")
                                 loop_pattern_count = 0  
-            if self.debug_mode and op in ('LABEL', 'GOTO', 'IFTRUE', 'IFFALSE'):
-                print(f"Step {self.steps_executed}: Executing {op} {arg1} {arg2} {result} at IP {self.ip}")
-            self.execute_instruction(op, arg1, arg2, result)
-            self.steps_executed += 1
-            if self.waiting_for_input:
-                break
-            if op not in ('GOTO', 'IFFALSE', 'IFTRUE', 'RETURN', 'CALL'):
-                self.ip += 1
+
+            if self.debug_mode:
+                current_instruction_str = f"{self.ip}: {op} {arg1}, {arg2}, {result}"
+                print(f"Step {self.steps_executed}: Executing {current_instruction_str}")
+                
+            try:
+                # Store the IP *before* executing, in case execute_instruction changes it
+                prev_ip = self.ip
+                self.execute_instruction(op, arg1, arg2, result)
+                self.steps_executed += 1
+                
+                if self.waiting_for_input:
+                    if self.debug_mode:
+                        print(f"--- Pausing for Input (IP: {self.ip}) ---")
+                    break  # Exit the loop to wait for input
+                    
+                # Only increment IP if it wasn't changed by a jump/call/return
+                if self.ip == prev_ip and op not in ('GOTO', 'IFFALSE', 'IFTRUE', 'RETURN', 'CALL'):
+                    self.ip += 1
+                    
+            except Exception as e:
+                error_line = self.ip
+                error_message = f"\nRuntime Error at instruction {error_line} ({op}): {str(e)}\n"
+                print(error_message)
+                print(traceback.format_exc())
+                self.output_buffer.write(error_message)
+                self.ip = len(self.instructions)  # Force stop
+            
+        if self.debug_mode:
+            final_output = self.output_buffer.getvalue()
+            print(f"--- Execution Finished (IP: {self.ip}, Steps: {self.steps_executed}) ---")
+            print(f"Final Output Buffer Content:\n'''\n{final_output}\n'''")
+            
         return self.output_buffer.getvalue()
+        
     def resume_with_input(self, user_input):
         """Resume execution after receiving user input with validation for numeric inputs."""
         if not self.waiting_for_input:
             raise ValueError("Interpreter is not waiting for input")
         
-        # Convert input to string for initial processing
-        input_val = str(user_input)
+        if self.debug_mode:
+            print(f"--- Resuming Execution with Input: '{user_input}' (IP: {self.ip}) ---")
+            print(f"  Variable to store input: {self.input_result_var}")
+            
+        # Clear the output buffer for this specific resume segment
+        self.output_buffer = StringIO()
         
-        # Check if this input is going to be typecast (set by the interpreter during execution)
-        expected_type = getattr(self, 'input_expected_type', None)
+        try:
+            # Process the received input
+            input_val_str = str(user_input)
+            validated_input = self.validate_and_parse_input(input_val_str, self.input_expected_type)
+            
+            # Store the validated input
+            self.memory[self.input_result_var] = validated_input
+            
+            if self.debug_mode:
+                print(f"  Stored validated input in '{self.input_result_var}': {validated_input} (type: {type(validated_input).__name__})")
+            
+            # Reset input state
+            self.waiting_for_input = False
+            self.input_prompt = ""
+            self.input_result_var = None
+            self.input_expected_type = None
+            self.ip += 1
+            
+        except ValueError as e:
+            error_message = f"\nInput Error: {str(e)}\n"
+            print(error_message)
+            print(traceback.format_exc())
+            self.output_buffer.write(error_message)
+            # Stay paused for new input
+            return self.output_buffer.getvalue()
         
-        # Validate based on expected type if typecasting is involved
+        # Continue execution from the instruction after INPUT
+        while 0 <= self.ip < len(self.instructions):
+            if self.max_execution_steps is not None and self.steps_executed >= self.max_execution_steps:
+                print(f"Execution terminated after {self.steps_executed} steps (max limit: {self.max_execution_steps}).")
+                self.output_buffer.write(f"\n[Execution stopped: Max steps ({self.max_execution_steps}) reached]\n")
+                break
+                
+            op, arg1, arg2, result = self.instructions[self.ip]
+            
+            if self.debug_mode:
+                current_instruction_str = f"{self.ip}: {op} {arg1}, {arg2}, {result}"
+                print(f"Step {self.steps_executed}: Executing {current_instruction_str}")
+                
+            try:
+                prev_ip = self.ip
+                self.execute_instruction(op, arg1, arg2, result)
+                self.steps_executed += 1
+                
+                if self.waiting_for_input:
+                    if self.debug_mode:
+                        print(f"--- Pausing for Input Again (IP: {self.ip}) ---")
+                    break
+                    
+                if op not in ('GOTO', 'IFFALSE', 'IFTRUE', 'RETURN', 'CALL') and self.ip == prev_ip:
+                    self.ip += 1
+                    
+            except Exception as e:
+                error_line = self.ip
+                error_message = f"\nRuntime Error at instruction {error_line} ({op}): {str(e)}\n"
+                print(error_message)
+                print(traceback.format_exc())
+                self.output_buffer.write(error_message)
+                self.ip = len(self.instructions)  # Force stop
+                
+        if self.debug_mode:
+            segment_output = self.output_buffer.getvalue()
+            print(f"--- Resumed Segment Finished (IP: {self.ip}, Steps: {self.steps_executed}) ---")
+            print(f"Segment Output Buffer Content:\n'''\n{segment_output}\n'''")
+            
+        return self.output_buffer.getvalue()
+    
+    def validate_and_parse_input(self, input_str, expected_type=None):
+        """Validates input string based on Minima rules and optional expected type."""
+        original_input_str = input_str  # Keep for error messages
+
+        # 1. Handle potential negative sign standard notation first
+        if input_str.startswith('-'):
+            input_str = '~' + input_str[1:]
+
+        # 2. Check if it looks like a number (integer or point)
+        is_potentially_numeric = False
+        cleaned_num_str = input_str.replace('~', '', 1)  # Remove tilde for digit/decimal check
+        if cleaned_num_str.replace('.', '', 1).isdigit():  # Check if digits/one decimal point
+            is_potentially_numeric = True
+
+        # 3. Validation based on expected type (if provided from TYPECAST)
         if expected_type:
             try:
                 if expected_type == 'integer':
-                    # Validate as integer
-                    if input_val.startswith('-'):
-                        input_val = '~' + input_val[1:]  # Convert to tilde notation
-                    
-                    # Try to parse as integer first to validate format
-                    try:
-                        numeric_value = -int(input_val[1:]) if input_val.startswith('~') else int(input_val)
-                        
-                        # Check range
-                        if numeric_value < self.min_number or numeric_value > self.max_number:
-                            raise ValueError(f"Integer input out of range: {numeric_value}. Valid range is {self.min_number} to {self.max_number}")
-                    except ValueError:
-                        # If it fails, it's not a valid integer format
-                        raise ValueError(f"Invalid integer format: '{user_input}'. Input must be a valid integer number.")
-                        
+                    if '.' in cleaned_num_str:  # Integers can't have decimals
+                        raise ValueError("Decimal point not allowed for integer input.")
+                    if not cleaned_num_str.isdigit():  # Must be digits after optional tilde
+                        raise ValueError("Invalid characters for integer input.")
+                    numeric_value = -int(cleaned_num_str) if input_str.startswith('~') else int(cleaned_num_str)
+                    # Check range (using the already defined validate_number logic)
+                    return self.validate_number(numeric_value)  # Returns validated number or raises error
+
                 elif expected_type == 'point':
-                    # Validate as floating point number
-                    if input_val.startswith('-'):
-                        input_val = '~' + input_val[1:]  # Convert to tilde notation
-                    
-                    # Try to parse as float to validate format
-                    try:
-                        numeric_value = -float(input_val[1:]) if input_val.startswith('~') else float(input_val)
-                        
-                        # Check range and digits
-                        if abs(numeric_value) > float(self.max_number) + 0.999999999:
-                            raise ValueError(f"Float input out of range: {numeric_value}. Valid range is ~{self.min_number}.999999999 to {self.max_number}.999999999")
-                        
-                        str_val = str(abs(numeric_value))
-                        parts = str_val.split('.')
-                        if len(parts[0]) > self.max_digits:
-                            raise ValueError(f"Integer part has too many digits: {parts[0]}. Maximum {self.max_digits} digits allowed")
-                        
-                        if len(parts) > 1 and len(parts[1]) > self.max_digits:
-                            raise ValueError(f"Fractional part has too many digits: {parts[1]}. Maximum {self.max_digits} digits allowed")
-                    except ValueError as e:
-                        if "invalid literal" in str(e) or "could not convert" in str(e):
-                            raise ValueError(f"Invalid point format: '{user_input}'. Input must be a valid floating point number.")
-                        else:
-                            raise e
-                        
+                    if not is_potentially_numeric:  # Must look like a number
+                        raise ValueError("Invalid characters for point input.")
+                    numeric_value = -float(cleaned_num_str) if input_str.startswith('~') else float(cleaned_num_str)
+                    # Check range and digits (using the already defined validate_number logic)
+                    return self.validate_number(numeric_value)  # Returns validated number or raises error
+
                 elif expected_type == 'state':
-                    # Validate as state (YES/NO or equivalent boolean value)
-                    upper_val = input_val.upper()
-                    if upper_val not in ['YES', 'NO', 'TRUE', 'FALSE', '0', '1']:
-                        raise ValueError(f"Invalid state value: '{user_input}'. Expected YES, NO, TRUE, FALSE, 0, or 1.")
-                    
-                    # Convert variations to standard YES/NO
-                    if upper_val in ['TRUE', '1']:
-                        input_val = 'YES'
-                    elif upper_val in ['FALSE', '0']:
-                        input_val = 'NO'
+                    upper_val = input_str.upper()
+                    if upper_val in ['YES', 'TRUE', '1']:
+                        return True  # Standardize to Python boolean
+                    elif upper_val in ['NO', 'FALSE', '0']:
+                        return False  # Standardize to Python boolean
                     else:
-                        input_val = upper_val  # Use uppercase version
-                    
+                        raise ValueError("Invalid state value. Expected YES, NO, TRUE, FALSE, 0, or 1.")
+
+                # If expected_type is 'text', no specific validation needed beyond it being a string
+                elif expected_type == 'text':
+                    return input_str  # Return the original string input
+
+                else:
+                    # Unknown expected type? Treat as text for now.
+                    return input_str
+
             except ValueError as e:
-                # Stop execution if validation fails
-                raise ValueError(f"Input validation error for {expected_type} type: {str(e)}")
-            
-            # Clear the expected type after processing
-            self.input_expected_type = None
+                # Re-raise validation error with more context
+                raise ValueError(f"Input '{original_input_str}' is not a valid {expected_type}: {str(e)}")
+
+        # 4. If no specific expected type, perform general validation
         else:
-            # If no typecast is involved, perform standard numeric validation
-            if input_val.strip().replace('.', '', 1).replace('~', '', 1).isdigit() or input_val.strip().replace('-', '', 1).replace('.', '', 1).isdigit():
-                # Handle negative numbers with minus sign by converting them
-                if input_val.startswith('-'):
-                    input_val = '~' + input_val[1:]
-                
+            # Try interpreting as number if it looks like one
+            if is_potentially_numeric:
                 try:
-                    # Try to interpret as integer first
-                    if '.' not in input_val:
-                        # Remove ~ for validation if present
-                        numeric_value = -int(input_val[1:]) if input_val.startswith('~') else int(input_val)
-                        
-                        # Check if in valid range
-                        if numeric_value < self.min_number or numeric_value > self.max_number:
-                            raise ValueError(f"Integer input out of range: {numeric_value}. Valid range is {self.min_number} to {self.max_number}")
-                        
-                        # Convert back to string using tilde notation for negative numbers
-                        if numeric_value < 0:
-                            input_val = f"~{abs(numeric_value)}"
+                    if '.' in cleaned_num_str:
+                        # Treat as point
+                        numeric_value = -float(cleaned_num_str) if input_str.startswith('~') else float(cleaned_num_str)
+                        return self.validate_number(numeric_value)
                     else:
-                        # Handle floating point
-                        numeric_value = -float(input_val[1:]) if input_val.startswith('~') else float(input_val)
-                        
-                        # Check if in valid range
-                        if abs(numeric_value) > float(self.max_number) + 0.999999999:
-                            raise ValueError(f"Float input out of range: {numeric_value}. Valid range is ~{self.min_number}.999999999 to {self.max_number}.999999999")
-                        
-                        # Check for too many digits in fractional part
-                        str_val = str(abs(numeric_value))
-                        parts = str_val.split('.')
-                        integer_part = parts[0]
-                        if len(integer_part) > self.max_digits:
-                            raise ValueError(f"Integer part has too many digits: {integer_part}. Maximum {self.max_digits} digits allowed")
-                        
-                        if len(parts) > 1:
-                            fractional_part = parts[1]
-                            if len(fractional_part) > self.max_digits:
-                                raise ValueError(f"Fractional part has too many digits: {fractional_part}. Maximum {self.max_digits} digits allowed")
-                        
-                        # Convert back to string using tilde notation for negative numbers
-                        if numeric_value < 0:
-                            input_val = f"~{abs(numeric_value)}"
+                        # Treat as integer
+                        numeric_value = -int(cleaned_num_str) if input_str.startswith('~') else int(cleaned_num_str)
+                        return self.validate_number(numeric_value)
                 except ValueError as e:
-                    # Stop execution if validation fails
-                    raise ValueError(f"Input validation error: {str(e)}")
-        
-        # Store the validated input
-        self.memory[self.input_result_var] = input_val
-        self.waiting_for_input = False
-        self.input_prompt = ""
-        self.ip += 1
-        
-        # Continue execution
-        while 0 <= self.ip < len(self.instructions):
-            op, arg1, arg2, result = self.instructions[self.ip]
-            self.execute_instruction(op, arg1, arg2, result)
-            if self.waiting_for_input:
-                break
-            if op not in ('GOTO', 'IFFALSE', 'IFTRUE', 'RETURN', 'CALL'):
-                self.ip += 1
-        return self.output_buffer.getvalue()
+                    # Catch range/digit errors from validate_number
+                    raise ValueError(f"Numeric input '{original_input_str}' validation failed: {str(e)}")
+
+            # If it doesn't look like a number, treat as text
+            else:
+                # Special case: Check for state literals even without explicit typecast
+                upper_val = input_str.upper()
+                if upper_val == 'YES': return True
+                if upper_val == 'NO': return False
+                # Otherwise, it's just text
+                return input_str  # Return as string
+
     def execute_instruction(self, op, arg1, arg2, result):
         if self.debug_mode and op in ('LABEL', 'GOTO', 'IFTRUE', 'IFFALSE'):
             print(f"Executing {op} with args: {arg1}, {arg2}, {result}")
@@ -619,6 +685,7 @@ class TACInterpreter:
                     else:
                          # Raise a more specific error if conversion/addition failed unexpectedly
                          raise TypeError(f"Error during numeric addition for '{arg1}' ({type(left_val).__name__}) and '{arg2}' ({type(right_val).__name__}): {e}")
+
         elif op == 'LIST_EXTEND':
             list_var = self.resolve_variable(arg1)
             extension = self.resolve_variable(arg2)
@@ -676,6 +743,7 @@ class TACInterpreter:
                 self.memory[result] = list_var
             else:
                 self.memory[arg1] = list_var
+
         elif op == 'LIST_SET':
             list_var_name = arg1 # Keep the name for potential modification
             # list_var = self.resolve_variable(list_var_name) # Fetching list later
@@ -748,6 +816,7 @@ class TACInterpreter:
             else:
                  # This case (negative index out of bounds after normalization)
                 raise ValueError(f"List index out of range: {index_int} (normalized: {normalized_index}) for list of length {list_len}")
+
         elif op == 'SUB':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
@@ -760,6 +829,7 @@ class TACInterpreter:
                 if "out of range" in str(e) or "too many digits" in str(e):
                     raise e
                 raise ValueError(f"Cannot subtract values: {left_val} - {right_val}")
+
         elif op == 'MUL':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
@@ -774,6 +844,7 @@ class TACInterpreter:
                     self.memory[result] = left_val * right_val
                 else:
                     raise ValueError(f"Cannot multiply values: {left_val} * {right_val}")
+
         elif op == 'DIV':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
@@ -787,6 +858,7 @@ class TACInterpreter:
                 if "Division by zero" in str(e):
                     raise ValueError("Division by zero")
                 raise ValueError(f"Cannot perform division on non-numeric values: {left_val} / {right_val}")
+
         elif op == 'MOD':
             left_val = self.get_value(arg1)
             right_val = self.get_value(arg2)
@@ -817,23 +889,28 @@ class TACInterpreter:
             if right_val == 0:
                 raise ValueError("Modulo by zero")
             self.memory[result] = left_val % right_val
+
         elif op == 'NEG':
             val = self.resolve_variable(arg1)
             try:
                 self.memory[result] = -float(val) if isinstance(val, float) or (isinstance(val, str) and '.' in val) else -int(val)
             except (ValueError, TypeError):
                 raise ValueError(f"Cannot negate non-numeric value: {val}")
+
         elif op == 'NOT':
             val = self.resolve_variable(arg1)
             self.memory[result] = not bool(val)
+
         elif op == 'AND':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
             self.memory[result] = bool(left_val) and bool(right_val)
+
         elif op == 'OR':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
             self.memory[result] = bool(left_val) or bool(right_val)
+
         elif op == 'EQ':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
@@ -843,6 +920,7 @@ class TACInterpreter:
                 self.memory[result] = (right_val is None or right_val == '')
             else:
                 self.memory[result] = (left_val == right_val)
+
         elif op == 'NEQ':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
@@ -852,6 +930,7 @@ class TACInterpreter:
                 self.memory[result] = (right_val is not None and right_val != '')
             else:
                 self.memory[result] = (left_val != right_val)
+
         elif op == 'LT':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
@@ -872,18 +951,22 @@ class TACInterpreter:
                     print(f"LT: {left_val} < {right_val} = {self.memory[result]}")
             except Exception as e:
                 raise ValueError(f"Error in LT comparison: {str(e)}")
+
         elif op == 'LE':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
             self.memory[result] = (left_val <= right_val)
+
         elif op == 'GT':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
             self.memory[result] = (left_val > right_val)
+
         elif op == 'GE':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
             self.memory[result] = (left_val >= right_val)
+
         elif op == 'GOTO':
             if result in self.labels:
                 if self.debug_mode:
@@ -891,6 +974,7 @@ class TACInterpreter:
                 self.ip = self.labels[result]
             else:
                 raise ValueError(f"Label not found: {result}")
+
         elif op == 'IFFALSE':
             cond = self.resolve_variable(arg1)
             if self.debug_mode:
@@ -906,6 +990,7 @@ class TACInterpreter:
                 if self.debug_mode:
                     print(f"Condition true, continuing to next instruction")
                 self.ip += 1
+
         elif op == 'IFTRUE':
             cond = self.resolve_variable(arg1)
             if self.debug_mode:
@@ -921,6 +1006,7 @@ class TACInterpreter:
                 if self.debug_mode:
                     print(f"Condition false, continuing to next instruction")
                 self.ip += 1
+
         elif op == 'PRINT':
             val = self.resolve_variable(arg1)
             if isinstance(val, list):
@@ -985,6 +1071,7 @@ class TACInterpreter:
                     val = val.replace('\\n', '\n')   
                     val = val.replace('\\t', '\t')   
                 self.output_buffer.write(str(val))
+
         elif op == 'CONCAT':
             val1 = self.resolve_variable(arg1)
             val2 = self.resolve_variable(arg2)
@@ -1011,22 +1098,24 @@ class TACInterpreter:
                     else:
                         str_val2 = processed
             self.memory[result] = str_val1 + str_val2
+
         elif op == 'INPUT':
             self.waiting_for_input = True
             self.input_result_var = result
             prompt = self.resolve_variable(arg1)
             
-            # Check if this input is part of a typecast operation by looking ahead
-            self.input_expected_type = None  # Reset the expected type
-            if self.ip + 1 < len(self.instructions):
-                next_op, next_arg1, next_arg2, next_result = self.instructions[self.ip + 1]
+            # Check if the next instruction is a TYPECAST involving this input variable
+            self.input_expected_type = None  # Reset before check
+            next_ip = self.ip + 1
+            if next_ip < len(self.instructions):
+                next_op, next_arg1, next_arg2, next_result = self.instructions[next_ip]
                 if next_op == 'TYPECAST' and next_arg1 == result:
-                    # This input will be typecast, store the expected type
-                    self.input_expected_type = next_arg2
+                    self.input_expected_type = next_arg2  # Store the target type
+                    if self.debug_mode:
+                        print(f"  Input for '{result}' expects type '{self.input_expected_type}' due to next instruction.")
             
-            if not prompt:
-                prompt = ""
-            self.input_prompt = prompt
+            self.input_prompt = str(prompt if prompt is not None else "")
+
         elif op == 'TYPECAST':
             val = self.resolve_variable(arg1)
             if arg2 == 'integer':
@@ -1066,8 +1155,10 @@ class TACInterpreter:
                     self.memory[result] = bool(val)
             else:
                 self.memory[result] = val
+
         elif op == 'LIST_CREATE':
             self.memory[result] = []
+
         elif op == 'LIST_APPEND':
             list_var = self.resolve_variable(arg1)
             item = self.resolve_variable(arg2)
@@ -1075,6 +1166,7 @@ class TACInterpreter:
                 list_var.append(item)
             else:
                 self.memory[arg1] = [item]
+
         elif op == 'LIST_ACCESS':
             list_var = self.resolve_variable(arg1)
             index_raw = arg2 # Keep the raw argument
@@ -1155,6 +1247,7 @@ class TACInterpreter:
                 if self.debug_mode:
                     print(f"Error during LIST_ACCESS operation: {e}")
                 raise ValueError(f"Runtime Error during list access: {e}")
+
         elif op == 'GROUP_ACCESS':
             group = self.resolve_variable(arg1)
             key = self.resolve_variable(arg2)
@@ -1165,10 +1258,12 @@ class TACInterpreter:
                     raise ValueError(f"Key {key} not found in group {arg1}")
             else:
                 raise ValueError(f"Cannot access key in non-group: {arg1}")
+
         elif op == 'GROUP_CREATE':
             self.memory[result] = {}
             if self.debug_mode:
                 print(f"Created empty group: {result}")
+
         elif op == 'GROUP_SET':
             group = self.resolve_variable(arg1)
             key = self.resolve_variable(arg2)
@@ -1182,8 +1277,10 @@ class TACInterpreter:
             
             if self.debug_mode:
                 print(f"Set group {arg1}[{key}] = {value}")
+
         elif op == 'ERROR':
             raise ValueError(f"Runtime error: {arg1}")
+
         if self.debug_mode and op in ('ASSIGN', 'ADD', 'SUB', 'MUL', 'DIV'):
             if result is not None and result in self.memory:
                 print(f"Variable '{result}' set to: {self.memory[result]}")
