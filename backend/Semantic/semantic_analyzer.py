@@ -1368,14 +1368,18 @@ class SemanticAnalyzer(Visitor):
         Semantic analysis for each_statement (for loop).
         Syntax: EACH LPAREN each_initialization expression SEMICOLON (expression | var_assign) RPAREN LBRACE loop_block RBRACE
         """
-        self.visit(node.children[2])
+        # Push scope before processing initialization
+        self.push_scope()
+        self.enter_loop()
+        
+        self.visit(node.children[2])  # Visit initialization inside new scope
         condition_expr = node.children[3]
         self.check_boolean_expr(condition_expr, "each loop condition")
         self.visit(condition_expr)
-        self.visit(node.children[5])
-        self.push_scope()
-        self.enter_loop()
-        self.visit(node.children[7])  
+        self.visit(node.children[5])  # Visit update expression
+        
+        self.visit(node.children[7])  # Visit loop body
+        
         self.exit_loop()
         self.pop_scope()
         return None
@@ -1637,16 +1641,35 @@ class SemanticAnalyzer(Visitor):
             self.visit(child)
         return None
     def visit_each_func_statement(self, node):
-        self.visit(node.children[2]) 
+        # Push scope before processing initialization
+        self.push_scope()
+        self.enter_loop()
+        
+        self.visit(node.children[2])  # Visit initialization inside new scope
+        
         condition_expr = node.children[3]
         self.check_boolean_expr(condition_expr, "each loop condition")
         self.visit(condition_expr)
-        self.visit(node.children[5]) 
-        self.push_scope()
-        self.enter_loop()
-        self.visit(node.children[7]) 
+        self.visit(node.children[5])  # Visit update expression
+        
+        self.visit(node.children[7])  # Visit loop body
+        
         self.exit_loop()
         self.pop_scope()
+        return None
+    def visit_loop_func_statement(self, node):
+        """
+        Semantic analysis for any kind of loop inside a function.
+        """
+        # The correct implementation depends on which node this is processing
+        # This is likely just a dispatcher function to other loop handlers
+        if hasattr(node, 'data'):
+            if node.data == 'each_func_statement':
+                return self.visit_each_func_statement(node)
+            elif node.data == 'repeat_func_statement':
+                return self.visit_repeat_func_statement(node)
+            elif node.data == 'do_repeat_func_statement':
+                return self.visit_do_repeat_func_statement(node)
         return None
     def visit_repeat_func_statement(self, node):
         condition_expr = node.children[2]

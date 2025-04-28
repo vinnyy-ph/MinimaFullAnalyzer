@@ -9,11 +9,13 @@ func fibonacci(n){
 }
 
 var n = integer(get("Enter n: "));
-var fib_list = [];
 
-each (var i = 0; i < n; i++) {
-    fib_list += [fibonacci(i)];
+checkif(n < 0) {
+    show("Please enter a positive number !");
+} otherwise {
+    var fib_list = [];
+    each (var i = 0; i < n; i++) {
+        fib_list += fibonacci(i);
+    }
+    show(join(" ", reverse(fib_list)));
 }
-
-
-show(reverse(fib_list));

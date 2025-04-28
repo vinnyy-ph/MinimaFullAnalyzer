@@ -1034,7 +1034,11 @@ class TACInterpreter:
                     self.memory[result] = 1 if val else 0
                 else:
                     try:
-                        computed_result = int(val)
+                        # Special handling for tilde notation strings
+                        if isinstance(val, str) and val.startswith('~') and len(val) > 1 and val[1:].isdigit():
+                            computed_result = -int(val[1:])
+                        else:
+                            computed_result = int(val)
                         self.memory[result] = self.validate_number(computed_result)
                     except (ValueError, TypeError) as e:
                         if "out of range" in str(e) or "too many digits" in str(e):
