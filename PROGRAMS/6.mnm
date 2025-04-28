@@ -1,8 +1,8 @@
 # Read a single letter (as text)
-var letter = text(get("Enter a single letter: "));
+var letter = lowercase(text(get("Enter a single letter: ")));
 
 # Check if the input is a single letter
-checkif (letter != empty && letter[1] == empty ) {
+checkif (length(letter) == 1) {
 
     # Check if it's a valid alphabetic character (both lowercase and uppercase)
     checkif (
@@ -11,8 +11,7 @@ checkif (letter != empty && letter[1] == empty ) {
 
         # Check if it's a vowel (both lowercase and uppercase)
         checkif (
-            letter == "a" || letter == "e" || letter == "i" || letter == "o" || letter == "u" ||
-            letter == "A" || letter == "E" || letter == "I" || letter == "O" || letter == "U"
+            letter == "a" || letter == "e" || letter == "i" || letter == "o" || letter == "u"
         ) {
             show(letter + " is a vowel");
         } otherwise {
