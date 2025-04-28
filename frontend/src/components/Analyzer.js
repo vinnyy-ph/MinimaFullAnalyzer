@@ -18,13 +18,25 @@ import {
   Paper,
   TextField,
   InputAdornment,
-  Button
+  Button,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
+  Divider,
+  Tooltip
 } from '@mui/material';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import TableChartIcon from '@mui/icons-material/TableChart';
 import CodeIcon from '@mui/icons-material/Code';
 import OutputIcon from '@mui/icons-material/Output';
+import FolderIcon from '@mui/icons-material/Folder';
+import HistoryIcon from '@mui/icons-material/History';
+import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
+import DeleteIcon from '@mui/icons-material/Delete';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
 const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
   const [code, setCode] = useState('');
@@ -43,11 +55,165 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
   const [executionId, setExecutionId] = useState(null);
   const [userInput, setUserInput] = useState('');
   
+  // Recent files state
+  const [recentFiles, setRecentFiles] = useState([]);
+  const [anchorEl, setAnchorEl] = useState(null);
+  const recentFilesOpen = Boolean(anchorEl);
+  
   // Terminal specific refs and states
   const terminalRef = useRef(null);
   const inputRef = useRef(null);
 
   const theme = useTheme();
+
+  // Load recent files from localStorage when component mounts
+  useEffect(() => {
+    const storedFiles = localStorage.getItem('minimaRecentFiles');
+    if (storedFiles) {
+      try {
+        setRecentFiles(JSON.parse(storedFiles));
+      } catch (e) {
+        console.error('Error loading recent files from localStorage:', e);
+        localStorage.removeItem('minimaRecentFiles');
+      }
+    }
+  }, []);
+
+  // Save recent files to localStorage when it changes
+  useEffect(() => {
+    if (recentFiles.length > 0) {
+      localStorage.setItem('minimaRecentFiles', JSON.stringify(recentFiles));
+    }
+  }, [recentFiles]);
+
+  const handleRecentFilesClick = (event) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleRecentFilesClose = () => {
+    setAnchorEl(null);
+  };
+
+  const addToRecentFiles = (filePath, fileContent) => {
+    // Add or update file in recent files list
+    setRecentFiles(prevFiles => {
+      // Check if file already exists in the list
+      const fileIndex = prevFiles.findIndex(f => f.path === filePath);
+      
+      // Create new file object
+      const newFile = { 
+        path: filePath, 
+        name: filePath.split('\\').pop(), 
+        lastOpened: new Date().toISOString(),
+        starred: fileIndex >= 0 ? prevFiles[fileIndex].starred : false,
+        content: fileContent
+      };
+      
+      let newFiles;
+      if (fileIndex >= 0) {
+        // Replace existing file
+        newFiles = [...prevFiles];
+        newFiles[fileIndex] = newFile;
+      } else {
+        // Add new file at the beginning, limit to 10 recent files
+        newFiles = [newFile, ...prevFiles].slice(0, 10);
+      }
+      
+      return newFiles;
+    });
+  };
+
+  const removeFromRecentFiles = (filePath) => {
+    setRecentFiles(prevFiles => prevFiles.filter(file => file.path !== filePath));
+  };
+
+  const toggleStarredFile = (filePath) => {
+    setRecentFiles(prevFiles => 
+      prevFiles.map(file => 
+        file.path === filePath 
+          ? { ...file, starred: !file.starred } 
+          : file
+      )
+    );
+  };
+
+  const clearAllRecentFiles = () => {
+    if (window.confirm('Are you sure you want to clear all recent files?')) {
+      setRecentFiles([]);
+      localStorage.removeItem('minimaRecentFiles');
+    }
+  };
+
+  const handleOpenRecentFile = (fileContent, fileName) => {
+    setCode(fileContent);
+    setFileName(fileName);
+    handleRecentFilesClose();
+  };
+
+  // Modified handleLoadFile to update recent files
+  const handleLoadFile = (file) => {
+    setLoading(true);
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const fileContent = event.target.result;
+      setCode(fileContent);
+      setLoading(false);
+      
+      // Add to recent files
+      if (file.path) {
+        addToRecentFiles(file.path, fileContent);
+      } else {
+        // For browsers that don't provide file path
+        addToRecentFiles(file.name, fileContent);
+      }
+    };
+    reader.onerror = (error) => {
+      console.error('Error reading file:', error);
+      alert('An error occurred while reading the file.');
+      setLoading(false);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleSaveFile = async () => {
+    if (!code) {
+      alert('There is no code to save.');
+      return;
+    }
+    if ('showSaveFilePicker' in window) {
+      try {
+        const options = {
+          suggestedName: fileName ? fileName : 'code.mnm',
+          types: [
+            {
+              description: 'Minima Files',
+              accept: { 'text/plain': ['.mnm'] },
+            },
+          ],
+        };
+        const handle = await window.showSaveFilePicker(options);
+        const writable = await handle.createWritable();
+        await writable.write(code);
+        await writable.close();
+        alert('File saved successfully!');
+      } catch (err) {
+        console.error('Error saving file:', err);
+        alert('An error occurred while saving the file.');
+      }
+    } else {
+      const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const downloadName = fileName ? fileName : 'code.mnm';
+      link.href = url;
+      link.download = downloadName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+  };
 
   const handleTabChange = (event, newValue) => {
     setRightPanelTab(newValue);
@@ -274,62 +440,6 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     setUserInput('');
   };
 
-  const handleLoadFile = (file) => {
-    setLoading(true);
-    setFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const fileContent = event.target.result;
-      setCode(fileContent);
-      setLoading(false);
-    };
-    reader.onerror = (error) => {
-      console.error('Error reading file:', error);
-      alert('An error occurred while reading the file.');
-      setLoading(false);
-    };
-    reader.readAsText(file);
-  };
-
-  const handleSaveFile = async () => {
-    if (!code) {
-      alert('There is no code to save.');
-      return;
-    }
-    if ('showSaveFilePicker' in window) {
-      try {
-        const options = {
-          suggestedName: fileName ? fileName : 'code.mnm',
-          types: [
-            {
-              description: 'Minima Files',
-              accept: { 'text/plain': ['.mnm'] },
-            },
-          ],
-        };
-        const handle = await window.showSaveFilePicker(options);
-        const writable = await handle.createWritable();
-        await writable.write(code);
-        await writable.close();
-        alert('File saved successfully!');
-      } catch (err) {
-        console.error('Error saving file:', err);
-        alert('An error occurred while saving the file.');
-      }
-    } else {
-      const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      const downloadName = fileName ? fileName : 'code.mnm';
-      link.href = url;
-      link.download = downloadName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    }
-  };
-
   useEffect(() => {
     if (!code) {
       setTokens([]);
@@ -352,6 +462,13 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
       event.preventDefault();
     }
   };
+
+  // Organize recent files with starred ones first
+  const sortedRecentFiles = [...recentFiles].sort((a, b) => {
+    if (a.starred && !b.starred) return -1;
+    if (!a.starred && b.starred) return 1;
+    return new Date(b.lastOpened) - new Date(a.lastOpened);
+  });
 
   return (
     <div style={{ padding: '20px' }}>
@@ -401,9 +518,112 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                   }}
                 />
               </IconButton>
-              <Typography color='text.primary' fontWeight='bold' variant="subtitle1">
-                Loaded File: {fileName || 'None'}
-              </Typography>
+              
+              {/* File name display and recent files button */}
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Typography color='text.primary' fontWeight='bold' variant="subtitle1">
+                  {fileName ? `File: ${fileName}` : 'No File Loaded'}
+                </Typography>
+                <Tooltip title="Recent Files">
+                  <IconButton 
+                    onClick={handleRecentFilesClick}
+                    color="primary"
+                    size="small"
+                    sx={{ ml: 1 }}
+                  >
+                    <ExpandMoreIcon />
+                  </IconButton>
+                </Tooltip>
+                
+                {/* Recent Files Menu */}
+                <Menu
+                  anchorEl={anchorEl}
+                  open={recentFilesOpen}
+                  onClose={handleRecentFilesClose}
+                  PaperProps={{
+                    sx: {
+                      maxHeight: 300,
+                      width: 320,
+                      overflow: 'auto'
+                    }
+                  }}
+                >
+                  <Box sx={{ px: 2, py: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="subtitle2" fontWeight="bold">
+                      <HistoryIcon fontSize="small" sx={{ verticalAlign: 'middle', mr: 1 }} />
+                      Recent Files
+                    </Typography>
+                    {recentFiles.length > 0 && (
+                      <Tooltip title="Clear All">
+                        <IconButton size="small" onClick={clearAllRecentFiles}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                  </Box>
+                  <Divider />
+                  
+                  {sortedRecentFiles.length > 0 ? (
+                    sortedRecentFiles.map((file, index) => (
+                      <MenuItem 
+                        key={index} 
+                        sx={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between',
+                          paddingRight: 1
+                        }}
+                        onClick={() => handleOpenRecentFile(file.content, file.name)}
+                      >
+                        <ListItemIcon>
+                          <FolderIcon fontSize="small" color="primary" />
+                        </ListItemIcon>
+                        <ListItemText 
+                          primary={file.name} 
+                          secondary={new Date(file.lastOpened).toLocaleDateString()}
+                          primaryTypographyProps={{
+                            sx: { 
+                              maxWidth: 180,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              display: 'block'
+                            }
+                          }}
+                        />
+                        <Box>
+                          <Tooltip title={file.starred ? "Unstar" : "Star"}>
+                            <IconButton 
+                              size="small" 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleStarredFile(file.path);
+                              }}
+                            >
+                              {file.starred ? <StarIcon fontSize="small" color="warning" /> : <StarBorderIcon fontSize="small" />}
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Remove">
+                            <IconButton 
+                              size="small" 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeFromRecentFiles(file.path);
+                              }}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      </MenuItem>
+                    ))
+                  ) : (
+                    <MenuItem disabled>
+                      <ListItemText primary="No recent files" />
+                    </MenuItem>
+                  )}
+                </Menu>
+              </Box>
+              
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
                 {(loading || executing) && (
                   <CircularProgress size={24} sx={{ marginRight: 2 }} />

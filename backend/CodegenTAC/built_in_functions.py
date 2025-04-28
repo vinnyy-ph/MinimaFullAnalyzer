@@ -399,8 +399,23 @@ class MinimaBultins:
             separator = str(separator)
             
         if isinstance(collection, list):
-            # Convert all items to strings
-            string_items = [str(item) for item in collection]
+            # Convert all items to strings with proper Minima formatting
+            string_items = []
+            for item in collection:
+                if isinstance(item, (int, float)) and item < 0:
+                    # Handle negative numbers with tilde notation
+                    if isinstance(item, int):
+                        string_items.append(f"~{abs(item)}")
+                    else:
+                        # Format float with proper precision
+                        formatted = f"{abs(item):.9f}".rstrip('0').rstrip('.')
+                        string_items.append(f"~{formatted}")
+                elif isinstance(item, bool):
+                    # Format booleans as YES/NO
+                    string_items.append("YES" if item else "NO")
+                else:
+                    string_items.append(str(item))
+            
             return separator.join(string_items)
         else:
             raise ValueError(f"Second argument of join() must be a list: {collection}")

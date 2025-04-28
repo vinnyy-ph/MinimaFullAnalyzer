@@ -72,28 +72,12 @@ class TACInterpreter:
         if abs(value) > float(self.max_number) + 0.999999999:
             raise ValueError(f"Float out of range for output: {value}. Valid range is ~{self.min_number}.999999999 to {self.max_number}.999999999")
             
-        # Format floating point value with truncation to 9 decimal places
-        str_val = str(abs(value))
-        parts = str_val.split('.')
-        integer_part = parts[0]
-        fractional_part = parts[1] if len(parts) > 1 else ""
-        
-        # Truncate fractional part to 9 digits if needed
-        if len(fractional_part) > self.max_digits:
-            fractional_part = fractional_part[:self.max_digits]
-        
-        # Remove trailing zeros
-        fractional_part = fractional_part.rstrip('0')
-        
-        # Format final output with tilde for negative numbers
-        if fractional_part:
-            formatted = f"{integer_part}.{fractional_part}"
-        else:
-            formatted = integer_part
-        
+        # Format with exactly 9 decimal places then trim trailing zeros
         if value < 0:
+            formatted = f"{abs(value):.9f}".rstrip('0').rstrip('.')
             return f"~{formatted}"
         else:
+            formatted = f"{value:.9f}".rstrip('0').rstrip('.')
             return formatted
 
     def set_execution_limit(self, limit=None):
