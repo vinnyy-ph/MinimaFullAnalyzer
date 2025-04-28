@@ -152,6 +152,12 @@ class TACInterpreter:
                     return float(val)
                 except ValueError:
                     pass
+        if isinstance(val, (int, float)) and val < 0:
+            if isinstance(val, int):
+                return f"~{abs(val)}"
+            else:
+                formatted = f"{abs(val):.9f}".rstrip('0').rstrip('.')
+                return f"~{formatted}"
         return val
 
     def reset(self):
@@ -1145,7 +1151,11 @@ class TACInterpreter:
                             raise e
                         self.memory[result] = 0.0  
             elif arg2 == 'text':
-                self.memory[result] = str(val)
+                # Apply the tilde notation for negative numbers when converting to text
+                if isinstance(val, (int, float)) and val < 0:
+                    self.memory[result] = f"~{abs(val)}"
+                else:
+                    self.memory[result] = str(val)
             elif arg2 == 'state':
                 if isinstance(val, (int, float)):
                     self.memory[result] = bool(val != 0)

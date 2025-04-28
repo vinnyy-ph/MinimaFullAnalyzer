@@ -323,9 +323,22 @@ class SemanticAnalyzer(Visitor):
             use_point = False
         L = self.to_numeric(left[0], left[1], "point" if use_point else "int")
         R = self.to_numeric(right[0], right[1], "point" if use_point else "int")
+        original_L_was_none = False
+        if L is None and left[0] in ["integer", "point", "state"]:
+             original_L_was_none = True
+             L = 0.0 if use_point else 0
+        original_R_was_none = False
+        if R is None and right[0] in ["integer", "point", "state"]:
+             original_R_was_none = True
+             R = 0.0 if use_point else 0
         result = None
         try:
             if op == "+":
+                if left[0] == "text" or right[0] == "text":
+                     L_str = str(left[1]) if left[1] is not None else ""
+                     R_str = str(right[1]) if right[1] is not None else ""
+                     if left[0] == "text" or right[0] == "text":
+                         return ("text", L_str + R_str)
                 result = L + R
             elif op == "-":
                 result = L - R
@@ -335,26 +348,37 @@ class SemanticAnalyzer(Visitor):
                 if R == 0 or R == 0.0:
                      self.errors.append(SemanticError(
                          "Division by zero", line, column))
-                     return ("unknown", None)
+                     return ("point" if use_point else "integer", None)
                 result = L / R
             elif op == "%":
                 if R == 0:
                      self.errors.append(SemanticError(
                          "Modulo by zero", line, column))
-                     return ("unknown", None)
+                     return ("integer", None)
                 result = L % R
             else:
                 self.errors.append(SemanticError(
                     f"Unsupported operator '{op}'", line, column))
                 return ("unknown", None)
+        except TypeError as e:
+             if "unsupported operand type(s)" in str(e) and (original_L_was_none or original_R_was_none):
+                 print(f"Fallback: Caught TypeError after None handling for op '{op}'. L={L}, R={R}. Original types: {left[0]}, {right[0]}")
+                 return ("integer" if not use_point else "point", None)
+             else:
+                 self.errors.append(SemanticError(
+                     f"Type error during operation '{op}': {str(e)} between {left[0]} and {right[0]}", line, column))
+                 return ("unknown", None)
         except Exception as e:
             self.errors.append(SemanticError(
                 f"Error evaluating expression: {str(e)}", line, column))
             return ("unknown", None)
+        result_value = None if original_L_was_none or original_R_was_none else result
         if use_point:
-            return ("point", result)
+            return ("point", result_value)
         else:
-            return ("integer", result)
+            if op == '/' and not use_point:
+                 return ("integer", int(result) if result_value is not None else None)
+            return ("integer", int(result) if result_value is not None else None)
     def to_state(self, expr):
         typ, val = expr
         if typ == "empty":
@@ -1368,18 +1392,14 @@ class SemanticAnalyzer(Visitor):
         Semantic analysis for each_statement (for loop).
         Syntax: EACH LPAREN each_initialization expression SEMICOLON (expression | var_assign) RPAREN LBRACE loop_block RBRACE
         """
-        # Push scope before processing initialization
         self.push_scope()
         self.enter_loop()
-        
-        self.visit(node.children[2])  # Visit initialization inside new scope
+        self.visit(node.children[2])  
         condition_expr = node.children[3]
         self.check_boolean_expr(condition_expr, "each loop condition")
         self.visit(condition_expr)
-        self.visit(node.children[5])  # Visit update expression
-        
-        self.visit(node.children[7])  # Visit loop body
-        
+        self.visit(node.children[5])  
+        self.visit(node.children[7])  
         self.exit_loop()
         self.pop_scope()
         return None
@@ -1641,19 +1661,14 @@ class SemanticAnalyzer(Visitor):
             self.visit(child)
         return None
     def visit_each_func_statement(self, node):
-        # Push scope before processing initialization
         self.push_scope()
         self.enter_loop()
-        
-        self.visit(node.children[2])  # Visit initialization inside new scope
-        
+        self.visit(node.children[2])  
         condition_expr = node.children[3]
         self.check_boolean_expr(condition_expr, "each loop condition")
         self.visit(condition_expr)
-        self.visit(node.children[5])  # Visit update expression
-        
-        self.visit(node.children[7])  # Visit loop body
-        
+        self.visit(node.children[5])  
+        self.visit(node.children[7])  
         self.exit_loop()
         self.pop_scope()
         return None
@@ -1661,8 +1676,6 @@ class SemanticAnalyzer(Visitor):
         """
         Semantic analysis for any kind of loop inside a function.
         """
-        # The correct implementation depends on which node this is processing
-        # This is likely just a dispatcher function to other loop handlers
         if hasattr(node, 'data'):
             if node.data == 'each_func_statement':
                 return self.visit_each_func_statement(node)

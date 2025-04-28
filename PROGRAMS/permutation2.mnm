@@ -1,0 +1,48 @@
+var i, input_string;
+var permutations;
+
+input_string = text(get("Enter a string:"));
+
+
+# Convert a one-dimensional list of characters to a single text
+func listToString(listChars) {
+    var i;
+    var result = "";
+    each(i = 0; i < length(listChars); i++) {
+        result = result + listChars[i];
+    }
+    throw result;
+}
+
+# ---------------- Permutation routine --------------
+
+func permute(str, l, r) {
+    checkif (l == r) {
+        show(listToString(str) + " ");
+    } otherwise {
+        each(i = l; i <= r; i++) {
+            # swap
+            var temp = str[l];
+            str[l] = str[i];
+            str[i] = temp;
+
+            permute(str, l + 1, r);
+
+            # back-track
+            temp = str[l];
+            str[l] = str[i];
+            str[i] = temp;
+        }
+    }
+}
+
+# ---------------- Main driver ---------------------
+
+var str_list = [];
+
+each(i = 0; i < length(input_string); i++) {
+    str_list += [input_string[i]];
+}
+
+permute(str_list, 0, length(input_string) - 1);
+show("\n");      # newline after all permutations

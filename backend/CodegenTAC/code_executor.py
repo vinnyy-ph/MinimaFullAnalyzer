@@ -51,7 +51,7 @@ def format_minima_output(output_text):
     """
     import re
     
-    # First handle negative numbers with tilde
+    # Improved regex to catch more negative number patterns including those in brackets/parens
     def replace_negatives(match):
         number = match.group(1)
         if '.' in number:  
@@ -62,8 +62,15 @@ def format_minima_output(output_text):
         else:  
             return f"~{number}"
     
-    # Apply tilde notation for negative numbers
-    formatted_text = re.sub(r'-(\d+(\.\d+)?)', replace_negatives, output_text)
+    # Match negative numbers in various contexts
+    # This expanded pattern will catch negative numbers in more contexts
+    formatted_text = re.sub(r'(?<!\w)-(\d+(?:\.\d+)?)', replace_negatives, output_text)
+    
+    # Special case for handling negative numbers at the start of strings or after spaces
+    formatted_text = re.sub(r'(^|\s+)-(\d+(?:\.\d+)?)', lambda m: m.group(1) + "~" + m.group(2), formatted_text)
+    
+    # Special case for handling negative numbers inside brackets and parentheses
+    formatted_text = re.sub(r'([\[\(,])-(\d+(?:\.\d+)?)', lambda m: m.group(1) + "~" + m.group(2), formatted_text)
     
     # Now trim all decimal places to max 9 digits
     def trim_decimals(match):
