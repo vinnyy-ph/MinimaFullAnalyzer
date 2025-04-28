@@ -8,9 +8,7 @@ import time
 import sys
 import traceback
 from io import StringIO
-
 execution_states = {}
-
 def format_minima_number(value):
     """
     Format a number for output according to Minima language rules.
@@ -42,7 +40,6 @@ def format_minima_number(value):
             return formatted
         else:
             return str(value)
-
 def format_minima_output(output_text):
     """
     Ensure all negative numbers in output are displayed with tilde notation.
@@ -50,8 +47,6 @@ def format_minima_output(output_text):
     Also trims any decimal places to max 9 digits.
     """
     import re
-    
-    # Improved regex to catch more negative number patterns including those in brackets/parens
     def replace_negatives(match):
         number = match.group(1)
         if '.' in number:  
@@ -61,30 +56,17 @@ def format_minima_output(output_text):
             return f"~{parts[0]}.{parts[1]}" if len(parts) > 1 else f"~{parts[0]}"
         else:  
             return f"~{number}"
-    
-    # Match negative numbers in various contexts
-    # This expanded pattern will catch negative numbers in more contexts
     formatted_text = re.sub(r'(?<!\w)-(\d+(?:\.\d+)?)', replace_negatives, output_text)
-    
-    # Special case for handling negative numbers at the start of strings or after spaces
     formatted_text = re.sub(r'(^|\s+)-(\d+(?:\.\d+)?)', lambda m: m.group(1) + "~" + m.group(2), formatted_text)
-    
-    # Special case for handling negative numbers inside brackets and parentheses
     formatted_text = re.sub(r'([\[\(,])-(\d+(?:\.\d+)?)', lambda m: m.group(1) + "~" + m.group(2), formatted_text)
-    
-    # Now trim all decimal places to max 9 digits
     def trim_decimals(match):
         whole = match.group(1)
         decimal = match.group(2)
         if len(decimal) > 9:
             decimal = decimal[:9]
         return f"{whole}.{decimal}"
-    
-    # Apply decimal place trimming for all numbers with more than 9 decimal places
     formatted_text = re.sub(r'((?:~)?\d+)\.(\d{10,})', trim_decimals, formatted_text)
-    
     return formatted_text
-
 def execute_code(code, execution_id=None, user_input=None):
     """
     Execute Minima code and return the results.
@@ -106,17 +88,13 @@ def execute_code(code, execution_id=None, user_input=None):
         'executionId': None,
         'terminalOutput': ''
     }
-
     interpreter = None
-
     if execution_id and execution_id in execution_states:
         interpreter, state = execution_states.pop(execution_id)
         try:
             if user_input is not None:
                 user_input = str(user_input)
-
             output_segment = interpreter.resume_with_input(user_input)
-
             results['success'] = True
             results['output'] = output_segment
             results['tac'] = interpreter.instructions
@@ -128,7 +106,6 @@ def execute_code(code, execution_id=None, user_input=None):
             results['terminalOutput'] = f"Error when processing input: {str(e)}\n"
             results['terminalOutput'] += traceback.format_exc()
             results['success'] = False
-
         if interpreter and interpreter.waiting_for_input:
             new_execution_id = str(uuid.uuid4())
             execution_states[new_execution_id] = (interpreter, 'input_wait')
@@ -141,9 +118,7 @@ def execute_code(code, execution_id=None, user_input=None):
         elif interpreter:
             results['waitingForInput'] = False
             results['terminalOutput'] += f"\nExecution completed after {interpreter.steps_executed} total steps.\n"
-
         return results
-    
     try:
         lexer = Lexer(code)
         tokens = []
@@ -155,36 +130,29 @@ def execute_code(code, execution_id=None, user_input=None):
         if lexer.errors:
             results['error'] = 'Lexical Errors: ' + ', '.join(error.message for error in lexer.errors)
             return results
-
         success, parse_tree_or_error = analyze_syntax(code)
         if not success:
             results['error'] = 'Syntax Error: ' + parse_tree_or_error['message']
             return results
         parse_tree = parse_tree_or_error
-
         semantic_analyzer = SemanticAnalyzer()
         semantic_errors = semantic_analyzer.analyze(parse_tree)
         if semantic_errors:
             results['error'] = 'Semantic Errors: ' + ', '.join(error.message for error in semantic_errors)
             return results
-
         code_generator = TACGenerator()
         tac_instructions = code_generator.generate(parse_tree)
         results['tac'] = tac_instructions
         results['formattedTAC'] = format_tac_instructions(tac_instructions)
         results['terminalOutput'] += f"Generated {len(tac_instructions)} TAC instructions.\n"
-
         interpreter = TACInterpreter().load(tac_instructions)
         max_steps = float('inf')
         interpreter.max_execution_steps = max_steps
-
         start_time = time.time()
         output_segment = interpreter.run()
         end_time = time.time()
         execution_time = end_time - start_time
-
         results['output'] = output_segment
-
         if interpreter.steps_executed >= max_steps:
             results['error'] = f"Execution exceeded maximum of {max_steps} steps. Potential infinite loop detected."
             results['terminalOutput'] += f"\n----- Execution Log -----\n"
@@ -200,7 +168,6 @@ def execute_code(code, execution_id=None, user_input=None):
         results['terminalOutput'] += f"\nError during initial execution: {str(e)}\n"
         results['terminalOutput'] += traceback.format_exc()
         results['success'] = False
-
     if interpreter and interpreter.waiting_for_input:
         execution_id = str(uuid.uuid4())
         execution_states[execution_id] = (interpreter, 'input_wait')
@@ -213,12 +180,9 @@ def execute_code(code, execution_id=None, user_input=None):
     elif interpreter and results['success']:
         results['waitingForInput'] = False
         results['terminalOutput'] += f"Execution completed after {interpreter.steps_executed} total steps.\n"
-
     if 'output' in results and results['output']:
         results['output'] = format_minima_output(results['output'])    
-
     return results
-
 def format_tac_instructions(tac_instructions):
     """Format TAC instructions for display."""
     formatted_lines = []

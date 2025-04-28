@@ -215,8 +215,6 @@ class TACGenerator(Visitor):
         """Visit a variable value node, handling both expressions and list literals."""
         if not node.children:
             return ('empty', None)
-        
-        # Case: Empty list initialization []
         if (len(node.children) >= 2 and 
             hasattr(node.children[0], 'type') and node.children[0].type == 'LSQB' and
             hasattr(node.children[1], 'type') and node.children[1].type == 'RSQB'):
@@ -224,21 +222,15 @@ class TACGenerator(Visitor):
             self.variable_types[temp] = "list"
             self.emit('LIST_CREATE', None, None, temp)
             return temp
-        
-        # Case: List with elements
         if (hasattr(node.children[0], 'type') and node.children[0].type == 'LSQB' and
             len(node.children) > 1):
-            # Check if the second child is a list value or right bracket
             if hasattr(node.children[1], 'type') and node.children[1].type == 'RSQB':
-                # Empty list
                 temp = self.get_temp()
                 self.variable_types[temp] = "list"
                 self.emit('LIST_CREATE', None, None, temp)
                 return temp
             else:
-                # Non-empty list - visit list value
                 return self.visit(node.children[1])
-            
         if hasattr(node.children[0], 'type') and node.children[0].type == 'GET':
             prompt_expr = None
             if len(node.children) >= 3:
@@ -293,38 +285,28 @@ class TACGenerator(Visitor):
         temp = self.get_temp()
         self.variable_types[temp] = "list"
         self.emit('LIST_CREATE', None, None, temp)
-        
-        # If there are children, process the first item and any subsequent items
         if node.children:
             first_item = self.visit(node.children[0])
-            # Convert the item to the appropriate form for LIST_APPEND
             if isinstance(first_item, tuple) and len(first_item) >= 2:
                 first_item_val = first_item[1]
             else:
                 first_item_val = first_item
             self.emit('LIST_APPEND', temp, first_item_val, None)
-            
-            # Process any additional items in the list
             if len(node.children) > 1:
                 self.visit_list_tail(node.children[1], temp)
-        
         return temp
     def visit_list_tail(self, node, list_temp):
         """Handle additional items in a list literal.
         Called recursively to process all elements in a list."""
         if not node or not hasattr(node, 'children'):
             return
-        
         if len(node.children) >= 2:
             item = self.visit(node.children[1])
-            # Convert the item to the appropriate form for LIST_APPEND
             if isinstance(item, tuple) and len(item) >= 2:
                 item_val = item[1]
             else:
                 item_val = item
             self.emit('LIST_APPEND', list_temp, item_val, None)
-        
-        # Process any additional items
         if len(node.children) > 2:
             self.visit_list_tail(node.children[2], list_temp)
     def visit_get_operand(self, node):
@@ -589,12 +571,16 @@ class TACGenerator(Visitor):
                 index_expr = self.visit(child.children[1])
                 temp = self.get_temp()
                 is_list_access = child.children[0].type == "LSQB"
-                index_val = index_expr
-                if isinstance(index_expr, tuple) and len(index_expr) >= 2:
-                     index_val = index_expr[1] 
                 if is_list_access:
-                    self.emit('LIST_ACCESS', var_name, index_val, temp)
+                    if isinstance(index_expr, tuple) and index_expr[0] == 'id':
+                        temp_idx = self.get_temp()
+                        self.emit('ASSIGN', index_expr[1], None, temp_idx)
+                        self.emit('LIST_ACCESS', var_name, temp_idx, temp)
+                    else:
+                        index_val = index_expr[1] if isinstance(index_expr, tuple) and len(index_expr) >= 2 else index_expr
+                        self.emit('LIST_ACCESS', var_name, index_val, temp)
                 else:
+                    index_val = index_expr[1] if isinstance(index_expr, tuple) and len(index_expr) >= 2 else index_expr
                     self.emit('GROUP_ACCESS', var_name, index_val, temp)
                 return temp
             if hasattr(child, 'data') and child.data == 'id_usagetail':
@@ -686,61 +672,45 @@ class TACGenerator(Visitor):
         has_accessor = False
         accessor_node = None
         accessor_expr = None
-        
-        # Check if this is a list element assignment (e.g., list[index] = value)
         if len(children) > 1 and children[1] and hasattr(children[1], 'data') and children[1].data == 'group_or_list':
             has_accessor = True
             accessor_node = children[1]
-            
-            # Get the index expression
             if hasattr(accessor_node, 'children') and len(accessor_node.children) > 1:
                 is_list_access = accessor_node.children[0].type == "LSQB"
                 if is_list_access:
                     index_expr = self.visit(accessor_node.children[1])
-                    accessor_expr = index_expr
-        
-        # Determine the position of assignment operator and expression
+                    if isinstance(index_expr, tuple) and index_expr[0] == 'id':
+                        temp_idx = self.get_temp()
+                        self.emit('ASSIGN', index_expr[1], None, temp_idx)
+                        accessor_expr = temp_idx
+                    else:
+                        accessor_expr = index_expr
         if has_accessor:
             assign_op_idx = 2
             expr_idx = 3
         else:
             assign_op_idx = 1
             expr_idx = 2
-        
-        # Get the assignment operator
         assign_op_node = children[assign_op_idx]
         if hasattr(assign_op_node, 'data'):
             op = assign_op_node.children[0].value
         else:
             op = assign_op_node.value if hasattr(assign_op_node, 'value') else '='
-        
-        # Get the expression to assign
         expr_node = children[expr_idx]
         expr_val = self.visit(expr_node)
-        
-        # Update type information if applicable
         if isinstance(expr_val, tuple) and len(expr_val) >= 2:
             self.variable_types[var_name] = expr_val[0]
-        
-        # Handle the assignment based on the operator and accessor
         if has_accessor and accessor_expr is not None:
-            # This is a list element assignment (e.g., list[index] = value)
             if op == '=':
-                # Simple assignment to list element
                 if isinstance(expr_val, tuple):
                     self.emit('LIST_SET', var_name, accessor_expr, expr_val[1])
                 else:
                     self.emit('LIST_SET', var_name, accessor_expr, expr_val)
             else:
-                # Compound assignment to list element (+=, -=, etc.)
-                # First, get the current value
                 temp = self.get_temp()
                 self.emit('LIST_ACCESS', var_name, accessor_expr, temp)
-                
-                # Perform the operation
                 result_temp = self.get_temp()
                 rhs = expr_val[1] if isinstance(expr_val, tuple) else expr_val
-                
                 if op == '+=':
                     self.emit('ADD', temp, rhs, result_temp)
                 elif op == '-=':
@@ -749,29 +719,22 @@ class TACGenerator(Visitor):
                     self.emit('MUL', temp, rhs, result_temp)
                 elif op == '/=':
                     self.emit('DIV', temp, rhs, result_temp)
-                
-                # Assign back to the list element
                 self.emit('LIST_SET', var_name, accessor_expr, result_temp)
         else:
-            # This is a simple variable assignment
             if op == '=':
                 if isinstance(expr_val, tuple):
                     self.emit('ASSIGN', expr_val[1], None, var_name)
                 else:
                     self.emit('ASSIGN', expr_val, None, var_name)
             else:
-                # Compound assignment to variable (+=, -=, etc.)
                 temp = self.get_temp()
                 self.emit('ASSIGN', var_name, None, temp)
                 rhs = expr_val[1] if isinstance(expr_val, tuple) else expr_val
                 result_temp = self.get_temp()
-                
                 var_type = self.get_type(var_name)
                 expr_type = expr_val[0] if isinstance(expr_val, tuple) else self.get_type(expr_val)
-                
                 if op == '+=':
                     if var_type == "list" or expr_type == "list":
-                        # For lists, use LIST_EXTEND instead of ADD for +=
                         self.emit('LIST_EXTEND', temp, rhs, var_name)
                         return None
                     elif var_type == "text" or expr_type == "text":
@@ -798,13 +761,10 @@ class TACGenerator(Visitor):
                 elif op == '/=':
                     self.emit('DIV', temp, rhs, result_temp)
                     self.variable_types[result_temp] = "point"
-                
-                # Only assign the result back if we didn't use LIST_EXTEND
                 if not (op == '+=' and (var_type == "list" or expr_type == "list")):
                     self.emit('ASSIGN', result_temp, None, var_name)
                     if result_temp in self.variable_types:
                         self.variable_types[var_name] = self.variable_types[result_temp]
-        
         return None
     def visit_show_statement(self, node):
         """
