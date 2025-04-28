@@ -99,7 +99,7 @@ class TACInterpreter:
             var_name = val[1]
             if var_name in self.memory:
                 return self.memory[var_name]
-            return None  # Return None for uninitialized variables instead of var_name
+            return var_name  # Fall back to the variable name if not found
         if isinstance(val, str) and val in self.memory:
             return self.memory[val]
         if isinstance(val, (int, float)):
@@ -152,8 +152,6 @@ class TACInterpreter:
                         return -float(val[1:])
                     return float(val)
                 except ValueError:
-                    # This is now where string literals are handled
-                    # If it's not a number and not in memory, treat as a string literal
                     pass
         if isinstance(val, (int, float)) and val < 0:
             if isinstance(val, int):
@@ -161,14 +159,6 @@ class TACInterpreter:
             else:
                 formatted = f"{abs(val):.9f}".rstrip('0').rstrip('.')
                 return f"~{formatted}"
-        # If val is a string that appears to be a variable name but not in memory,
-        # we need to check if it's actually intended to be a string literal
-        if isinstance(val, str) and not val.startswith('"') and not val.startswith('~') and not val.isdigit():
-            # If it's not in memory and not a numeric string, it might be a variable reference
-            # For variable references, we should return None (empty)
-            if val in self.memory:
-                return self.memory[val]
-            return None  # Uninitialized variables return None (empty)
         return val
 
     def reset(self):
@@ -1048,20 +1038,12 @@ class TACInterpreter:
 
         elif op == 'PRINT':
             val = self.resolve_variable(arg1)
-            if val is None:
-                # Format None as "empty" for output
-                self.output_buffer.write("empty")
-            elif isinstance(val, list):
+            if isinstance(val, list):
                 formatted_list = []
                 for item in val:
-                    if item is None:
-                        # Handle None values within lists as "empty"
-                        formatted_list.append("empty")
-                    elif isinstance(item, tuple) and len(item) >= 2:
+                    if isinstance(item, tuple) and len(item) >= 2:
                         value = item[1]
-                        if value is None:
-                            formatted_list.append("empty")
-                        elif isinstance(value, bool):
+                        if isinstance(value, bool):
                             value = "YES" if value else "NO"
                         elif isinstance(value, (int, float)):
                             try:
@@ -1078,9 +1060,7 @@ class TACInterpreter:
                                     value = f"~{abs(value)}" if value < 0 else str(value)
                         formatted_list.append(value)
                     else:
-                        if item is None:
-                            formatted_list.append("empty")
-                        elif isinstance(item, bool):
+                        if isinstance(item, bool):
                             item = "YES" if item else "NO"
                         elif isinstance(item, (int, float)):
                             try:
@@ -1114,37 +1094,28 @@ class TACInterpreter:
                         else:
                             val = f"~{abs(val)}" if val < 0 else str(val)
                 
-                # Format the final value, ensuring None becomes "empty"
-                output_val = "empty" if val is None else val
-                
-                if isinstance(output_val, str):
-                    output_val = output_val.replace('\\\\', '\\')  
-                    output_val = output_val.replace('\\"', '"')    
-                    output_val = output_val.replace('\\n', '\n')   
-                    output_val = output_val.replace('\\t', '\t')   
-                self.output_buffer.write(str(output_val))
+                if isinstance(val, str):
+                    val = val.replace('\\\\', '\\')  
+                    val = val.replace('\\"', '"')    
+                    val = val.replace('\\n', '\n')   
+                    val = val.replace('\\t', '\t')   
+                self.output_buffer.write(str(val))
 
         elif op == 'CONCAT':
             val1 = self.resolve_variable(arg1)
             val2 = self.resolve_variable(arg2)
-            if val1 is None:
-                str_val1 = "empty"
-            elif isinstance(val1, bool):
+            if isinstance(val1, bool):
                 str_val1 = "YES" if val1 else "NO"
             elif isinstance(val1, (int, float)) and val1 < 0:
                 str_val1 = f"~{abs(val1)}"
             else:
-                str_val1 = str(val1)
-                
-            if val2 is None:
-                str_val2 = "empty"
-            elif isinstance(val2, bool):
+                str_val1 = "" if val1 is None else str(val1)
+            if isinstance(val2, bool):
                 str_val2 = "YES" if val2 else "NO"
             elif isinstance(val2, (int, float)) and val2 < 0:
                 str_val2 = f"~{abs(val2)}"
             else:
-                str_val2 = str(val2)
-                
+                str_val2 = "" if val2 is None else str(val2)
             for i, str_val in enumerate([str_val1, str_val2]):
                 if isinstance(str_val, str) and str_val:  
                     processed = str_val.replace('\\\\', '\\')  
