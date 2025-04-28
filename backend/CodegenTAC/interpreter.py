@@ -31,6 +31,14 @@ class TACInterpreter:
         """Validate that a number is within the allowed range."""
         if value is None or not isinstance(value, (int, float)):
             return value
+            
+        # We'll skip the float-to-int conversion for division results
+        # This flag will be passed from the DIV operation
+        if hasattr(value, '_preserve_float') and value._preserve_float:
+            # Remove the flag attribute before returning
+            delattr(value, '_preserve_float')
+            return value
+            
         if isinstance(value, float) and value.is_integer():
             value = int(value)
         if isinstance(value, int):
@@ -867,12 +875,12 @@ class TACInterpreter:
                     raise ValueError("Division by zero")
                     
                 # Calculate result and validate it
-                computed_result = left_num / right_num
+                # Always use true division (Python-style) which returns a float
+                computed_result = float(left_num) / float(right_num)
                 
-                # If both operands are integers and the original code expected integer division
-                # Force integer division for algorithm correctness
-                if isinstance(left_val, int) and isinstance(right_val, int):
-                    computed_result = int(computed_result)
+                # Remove the integer conversion - we always want float division results
+                # if isinstance(left_val, int) and isinstance(right_val, int):
+                #     computed_result = int(computed_result)
                     
                 self.memory[result] = self.validate_number(computed_result)
             except (ValueError, TypeError) as e:
