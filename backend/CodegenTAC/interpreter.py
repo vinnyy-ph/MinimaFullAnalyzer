@@ -860,12 +860,20 @@ class TACInterpreter:
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
             try:
+                # Convert to numbers if needed
                 left_num = float(left_val) if isinstance(left_val, float) or (isinstance(left_val, str) and '.' in left_val) else int(left_val)
                 right_num = float(right_val) if isinstance(right_val, float) or (isinstance(right_val, str) and '.' in right_val) else int(right_val)
                 if right_num == 0:
                     raise ValueError("Division by zero")
+                    
                 # Calculate result and validate it
                 computed_result = left_num / right_num
+                
+                # If both operands are integers and the original code expected integer division
+                # Force integer division for algorithm correctness
+                if isinstance(left_val, int) and isinstance(right_val, int):
+                    computed_result = int(computed_result)
+                    
                 self.memory[result] = self.validate_number(computed_result)
             except (ValueError, TypeError) as e:
                 if "Division by zero" in str(e):
