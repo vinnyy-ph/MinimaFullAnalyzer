@@ -376,6 +376,16 @@ class TACInterpreter:
                 if upper_val == 'NO': return False
                 return input_str
 
+    def evaluate_condition(self, value):
+        """Evaluates a value according to Minima's boolean rules (YES/NO)."""
+        if value == "YES" or value is True:
+            return True
+        if value == "NO" or value is False:
+            return False
+        # Fallback to standard Python truthiness for other types (numbers, lists, etc.)
+        # Note: Empty strings/lists/0 will be False, non-empty/non-zero will be True.
+        return bool(value)
+
     def execute_instruction(self, op, arg1, arg2, result):
         if self.debug_mode and op in ('LABEL', 'GOTO', 'IFTRUE', 'IFFALSE'):
             print(f"Executing {op} with args: {arg1}, {arg2}, {result}")
@@ -632,8 +642,15 @@ class TACInterpreter:
         # Logical NOT
         elif op == 'NOT':
             val = self.resolve_variable(arg1)
-            self.assign_variable(result, not bool(val))
-            
+            # Handle Minima boolean strings explicitly
+            if val == "YES" or val is True:
+                self.assign_variable(result, "NO") # Use Minima's string representation
+            elif val == "NO" or val is False:
+                self.assign_variable(result, "YES") # Use Minima's string representation
+            else:
+                # Fallback to standard Python truthiness for other types
+                self.assign_variable(result, not bool(val))
+
         # Logical AND
         elif op == 'AND':
             left_val = self.resolve_variable(arg1)
@@ -768,7 +785,7 @@ class TACInterpreter:
         # Conditional jump if false
         elif op == 'IFFALSE':
             cond_val = self.resolve_variable(arg1)
-            if not bool(cond_val):
+            if not self.evaluate_condition(cond_val):  # Use the helper method
                 if result in self.labels:
                     self.ip = self.labels[result]
                 else:
@@ -777,7 +794,7 @@ class TACInterpreter:
         # Conditional jump if true
         elif op == 'IFTRUE':
             cond_val = self.resolve_variable(arg1)
-            if bool(cond_val):
+            if self.evaluate_condition(cond_val):  # Use the helper method
                 if result in self.labels:
                     self.ip = self.labels[result]
                 else:

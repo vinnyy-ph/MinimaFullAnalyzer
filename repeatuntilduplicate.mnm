@@ -1,0 +1,34 @@
+var list = [];
+var input, i, sum_list;
+
+# do {
+#     checkif(contains(list, input)) {
+#         input = get("Enter a number: ");
+#         list += [input];        
+#     } otherwise {
+#         exit;
+#     }
+# } repeat (YES);
+
+# each (i = 0; i < 5; i++) {
+#     input = get("Enter a number: ");
+#     checkif(contains(list, input)) {
+#         exit;
+#     } otherwise {
+#         list += [input];
+#     }
+# }
+
+# show(list);
+
+do {
+    input = get("Enter a number: ");
+    checkif(contains(list, input)) {
+        exit;
+    } otherwise {
+        list += [input];
+        sum_list += input;
+    }
+} repeat (contains(list, input));
+
+show(sum_list);

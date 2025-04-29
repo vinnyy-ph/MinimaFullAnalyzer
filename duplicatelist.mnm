@@ -1,0 +1,27 @@
+var list = [];
+
+func duplicateList(list, size) {
+    var i, j;
+    var duplicates = 0;
+    var counted = []; 
+
+    each (i = 0; i < size; i++) {
+        each (j = i + 1; j < size; j++) { 
+            checkif (list[i] == list[j] && !contains(counted, i)) { 
+                duplicates++;
+                counted += [i]; 
+                exit;
+            }
+        }
+    }
+    throw duplicates;
+}
+
+var n = get("Enter size of the array: ");
+
+each (var i = 0; i < n; i++) {
+    var input = get("Enter values: ");
+    list += [input];
+}
+
+show(duplicateList(list, n));
