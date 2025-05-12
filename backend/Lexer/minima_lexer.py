@@ -144,8 +144,6 @@ class Lexer:
             # Could be "integer", "indexOf", "isqrt"
             if len(value) == 7 and value[1] == 'n' and value[2] == 't' and value[3] == 'e' and value[4] == 'g' and value[5] == 'e' and value[6] == 'r':
                 return 'integer'
-            elif len(value) == 7 and value[1] == 'n' and value[2] == 'd' and value[3] == 'e' and value[4] == 'x' and value[5] == 'O' and value[6] == 'f':
-                return 'indexOf'
             elif len(value) == 5 and value[1] == 's' and value[2] == 'q' and value[3] == 'r' and value[4] == 't':
                 return 'isqrt'
 
