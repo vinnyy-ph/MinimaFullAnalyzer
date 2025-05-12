@@ -18,7 +18,7 @@ class Lexer:
         self.line = 1
         self.column = 1
 
-        # This is the FSM’s current state
+        # This is the FSM's current state
         self.current_state = LexerState.INITIAL
 
         # Buffers and outputs
@@ -90,6 +90,10 @@ class Lexer:
                 return 'case'
             elif len(value) == 7 and value[1] == 'h' and value[2] == 'e' and value[3] == 'c' and value[4] == 'k' and value[5] == 'i' and value[6] == 'f':
                 return 'checkif'
+            elif len(value) == 8 and value[1] == 'o' and value[2] == 'n' and value[3] == 't' and value[4] == 'a' and value[5] == 'i' and value[6] == 'n' and value[7] == 's':
+                return 'contains'
+            elif len(value) == 4 and value[1] == 'e' and value[2] == 'i' and value[3] == 'l':
+                return 'ceil'
 
         # ----- Starts with 'd' -----
         if value[0] == 'd':
@@ -111,11 +115,15 @@ class Lexer:
 
         # ----- Starts with 'f' -----
         if value[0] == 'f':
-            # Could be "fixed", "func"
+            # Could be "fixed", "func", "factorial", "floor"
             if len(value) == 5 and value[1] == 'i' and value[2] == 'x' and value[3] == 'e' and value[4] == 'd':
                 return 'fixed'
             elif len(value) == 4 and value[1] == 'u' and value[2] == 'n' and value[3] == 'c':
                 return 'func'
+            elif len(value) == 9 and value[1] == 'a' and value[2] == 'c' and value[3] == 't' and value[4] == 'o' and value[5] == 'r' and value[6] == 'i' and value[7] == 'a' and value[8] == 'l':
+                return 'factorial'
+            elif len(value) == 5 and value[1] == 'l' and value[2] == 'o' and value[3] == 'o' and value[4] == 'r':
+                return 'floor'
 
         # ----- Starts with 'g' -----
         if value[0] == 'g':
@@ -127,9 +135,32 @@ class Lexer:
 
         # ----- Starts with 'i' -----
         if value[0] == 'i':
-            # Could be "integer"
+            # Could be "integer", "indexOf", "isqrt"
             if len(value) == 7 and value[1] == 'n' and value[2] == 't' and value[3] == 'e' and value[4] == 'g' and value[5] == 'e' and value[6] == 'r':
                 return 'integer'
+            elif len(value) == 7 and value[1] == 'n' and value[2] == 'd' and value[3] == 'e' and value[4] == 'x' and value[5] == 'O' and value[6] == 'f':
+                return 'indexOf'
+            elif len(value) == 5 and value[1] == 's' and value[2] == 'q' and value[3] == 'r' and value[4] == 't':
+                return 'isqrt'
+
+        # ----- Starts with 'j' -----
+        if value[0] == 'j':
+            if len(value) == 4 and value[1] == 'o' and value[2] == 'i' and value[3] == 'n':
+                return 'join'
+
+        # ----- Starts with 'l' -----
+        if value[0] == 'l':
+            if len(value) == 6 and value[1] == 'e' and value[2] == 'n' and value[3] == 'g' and value[4] == 't' and value[5] == 'h':
+                return 'length'
+            elif len(value) == 9 and value[1] == 'o' and value[2] == 'w' and value[3] == 'e' and value[4] == 'r' and value[5] == 'c' and value[6] == 'a' and value[7] == 's' and value[8] == 'e':
+                return 'lowercase'
+
+        # ----- Starts with 'm' -----
+        if value[0] == 'm':
+            if len(value) == 3 and value[1] == 'a' and value[2] == 'x':
+                return 'max'
+            elif len(value) == 3 and value[1] == 'i' and value[2] == 'n':
+                return 'min'
 
         # ----- Starts with 'n' -----
         if value[0] == 'n':
@@ -145,35 +176,49 @@ class Lexer:
 
         # ----- Starts with 'p' -----
         if value[0] == 'p':
-            # Could be "point"
+            # Could be "point", "pow"
             if len(value) == 5 and value[1] == 'o' and value[2] == 'i' and value[3] == 'n' and value[4] == 't':
                 return 'point'
+            elif len(value) == 3 and value[1] == 'o' and value[2] == 'w':
+                return 'pow'
 
         # ----- Starts with 'r' -----
         if value[0] == 'r':
-            # Could be "recheck", "repeat"
+            # Could be "recheck", "repeat", "reverse", "round"
             if len(value) == 7 and value[1] == 'e' and value[2] == 'c' and value[3] == 'h' and value[4] == 'e' and value[5] == 'c' and value[6] == 'k':
                 return 'recheck'
             elif len(value) == 6 and value[1] == 'e' and value[2] == 'p' and value[3] == 'e' and value[4] == 'a' and value[5] == 't':
                 return 'repeat'
+            elif len(value) == 7 and value[1] == 'e' and value[2] == 'v' and value[3] == 'e' and value[4] == 'r' and value[5] == 's' and value[6] == 'e':
+                return 'reverse'
+            elif len(value) == 5 and value[1] == 'o' and value[2] == 'u' and value[3] == 'n' and value[4] == 'd':
+                return 'round'
 
         # ----- Starts with 's' -----
         if value[0] == 's':
-            # Could be "show", "state", "switch"
+            # Could be "show", "state", "switch", "sorted", "sum", "slice"
             if len(value) == 4 and value[1] == 'h' and value[2] == 'o' and value[3] == 'w':
                 return 'show'
             elif len(value) == 5 and value[1] == 't' and value[2] == 'a' and value[3] == 't' and value[4] == 'e':
                 return 'state'
             elif len(value) == 6 and value[1] == 'w' and value[2] == 'i' and value[3] == 't' and value[4] == 'c' and value[5] == 'h':
                 return 'switch'
+            elif len(value) == 6 and value[1] == 'o' and value[2] == 'r' and value[3] == 't' and value[4] == 'e' and value[5] == 'd':
+                return 'sorted'
+            elif len(value) == 3 and value[1] == 'u' and value[2] == 'm':
+                return 'sum'
+            elif len(value) == 5 and value[1] == 'l' and value[2] == 'i' and value[3] == 'c' and value[4] == 'e':
+                return 'slice'
 
         # ----- Starts with 't' -----
         if value[0] == 't':
-            # Could be "text", "throw"
+            # Could be "text", "throw", "type"
             if len(value) == 4 and value[1] == 'e' and value[2] == 'x' and value[3] == 't':
                 return 'text'
             elif len(value) == 5 and value[1] == 'h' and value[2] == 'r' and value[3] == 'o' and value[4] == 'w':
                 return 'throw'
+            elif len(value) == 4 and value[1] == 'y' and value[2] == 'p' and value[3] == 'e':
+                return 'type'
         
         # ----- Starts with 'v' -----
         if value[0] == 'v':
@@ -256,7 +301,7 @@ class Lexer:
 
                 continue
 
-            #--- Handle each state’s logic
+            #--- Handle each state's logic
             if self.current_state == LexerState.READING_SPACE:
                 return self.handle_state_reading_space(start_line, start_column)
 

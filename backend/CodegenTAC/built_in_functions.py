@@ -50,11 +50,6 @@ class MinimaBultins:
             'return_type': 'state',
             'implementation': lambda interpreter, args: MinimaBultins._contains(interpreter, args)
         },
-        'indexOf': {
-            'params': 2,
-            'return_type': 'integer',
-            'implementation': lambda interpreter, args: MinimaBultins._indexOf(interpreter, args)
-        },
         'join': {
             'params': 2,
             'return_type': 'text',

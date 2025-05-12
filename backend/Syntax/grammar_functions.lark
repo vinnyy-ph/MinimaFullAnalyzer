@@ -19,7 +19,7 @@ SHOW: "show"
 CHECKIF: "checkif"
 RECHECK: "recheck"
 OTHERWISE: "otherwise"
-MATCH: "match"
+SWITCH: "switch"
 CASE: "case"
 DEFAULT: "default"
 EXIT: "exit"
@@ -29,6 +29,29 @@ REPEAT: "repeat"
 DO: "do"
 EMPTY: "empty"
 FUNC: "func"
+
+# Built-in functions
+LENGTH: "length"
+UPPERCASE: "uppercase"
+LOWERCASE: "lowercase"
+MAX: "max"
+MIN: "min"
+SORTED: "sorted"
+REVERSE: "reverse"
+ABS: "abs"
+SUM: "sum"
+CONTAINS: "contains"
+INDEXOF: "indexOf"
+JOIN: "join"
+SLICE: "slice"
+UNIQUE: "unique"
+TYPE: "type"
+ISQRT: "isqrt"
+POW: "pow"
+FACTORIAL: "factorial"
+CEIL: "ceil"
+FLOOR: "floor"
+ROUND: "round"
 
 OR_OP: "||"
 AND_OP: "&&"
@@ -46,6 +69,7 @@ SLASH: "/"
 PERCENT: "%"
 
 BANG: "!"
+TILDE: "~"
 INC_OP: "++"
 DEC_OP: "--"
 
@@ -64,7 +88,7 @@ POINT: "point"
 STATE: "state"
 TEXT: "text"
 
-IDENTIFIER: /(?!(?:var|fixed|group|func|throw|show|checkif|recheck|otherwise|match|case|default|exit|next|each|repeat|do|integer|point|state|text|empty|get)(?![a-zA-Z0-9_]))[a-z][a-zA-Z0-9_]*/
+IDENTIFIER: /(?!(?:var|fixed|group|func|throw|show|checkif|recheck|otherwise|switch|case|default|exit|next|each|repeat|do|integer|point|state|text|empty|get|length|uppercase|lowercase|max|min|sorted|reverse|abs|sum|contains|indexOf|join|slice|unique|type|isqrt|pow|factorial|ceil|floor|round)(?![a-zA-Z0-9_]))[a-z][a-zA-Z0-9_]*/
 INTEGERLITERAL: /[0-9]{1,9}/
 POINTLITERAL: /[0-9]{1,9}\.[0-9]{1,9}/
 NEGINTEGERLITERAL: /~[0-9]{1,9}/
@@ -151,7 +175,7 @@ assign_op: ASSIGN
          | mul_expr (STAR|SLASH|PERCENT) pre_expr
 
 ?pre_expr: BANG pre_expr
-         | MINUS pre_expr
+         | TILDE pre_expr
          | primary_expr
 
 ?primary_expr: LPAREN expression RPAREN
@@ -183,7 +207,7 @@ var_assign: IDENTIFIER group_or_list assign_op variable_value
 show_statement: SHOW LPAREN expression RPAREN
 
 ?conditional_statement: checkif_statement SEMICOLON?
-                      | match_statement SEMICOLON?
+                      | switch_statement SEMICOLON?
 
 ?loop_statement: each_statement SEMICOLON?
                | repeat_statement SEMICOLON? 
@@ -196,7 +220,7 @@ checkif_statement: CHECKIF LPAREN expression RPAREN LBRACE program_block RBRACE 
 ?otherwise_statement: OTHERWISE LBRACE program_block RBRACE
                     | 
 
-match_statement: MATCH LPAREN expression RPAREN LBRACE CASE literals COLON program_block case_tail default RBRACE
+switch_statement: SWITCH LPAREN expression RPAREN LBRACE CASE literals COLON program_block case_tail default RBRACE
 
 ?case_tail: CASE literals COLON program_block case_tail
           | 
@@ -222,7 +246,7 @@ loop_block: ( declarations
             | control_flow )*
 
 ?conditional_loop_statement: loop_checkif_statement SEMICOLON?
-                           | loop_match_statement SEMICOLON?
+                           | loop_switch_statement SEMICOLON?
 
 loop_checkif_statement: CHECKIF LPAREN expression RPAREN LBRACE loop_block RBRACE loop_recheck_statement loop_otherwise_statement
 
@@ -231,17 +255,17 @@ loop_checkif_statement: CHECKIF LPAREN expression RPAREN LBRACE loop_block RBRAC
 ?loop_otherwise_statement: OTHERWISE LBRACE loop_block RBRACE
                          | 
 
-loop_match_statement: MATCH LPAREN expression RPAREN LBRACE CASE literals COLON loop_block case_tail_loop loop_match_default RBRACE
+loop_switch_statement: SWITCH LPAREN expression RPAREN LBRACE CASE literals COLON loop_block case_tail_loop loop_switch_default RBRACE
 
 ?case_tail_loop: CASE literals COLON loop_block case_tail_loop
                | 
 
-?loop_match_default: DEFAULT COLON loop_block |
+?loop_switch_default: DEFAULT COLON loop_block |
 
 func_definition: FUNC IDENTIFIER LPAREN param RPAREN LBRACE function_prog RBRACE SEMICOLON?
 
-?param: IDENTIFIER (COMMA IDENTIFIER )*   
-       |                                 
+?param: IDENTIFIER (COMMA IDENTIFIER )*   // one or more params
+       |                                  // or empty if no params
 
 throw_statement: THROW expression SEMICOLON
 
@@ -257,7 +281,7 @@ function_prog: ( declarations
                | throw_statement )*
 
 ?conditional_func_statement: func_checkif_statement SEMICOLON?
-                           | func_match_statement SEMICOLON?
+                           | func_switch_statement SEMICOLON?
 
 func_checkif_statement: CHECKIF LPAREN expression RPAREN LBRACE function_prog RBRACE func_recheck_statement func_otherwise_statement
 
@@ -266,12 +290,12 @@ func_checkif_statement: CHECKIF LPAREN expression RPAREN LBRACE function_prog RB
 ?func_otherwise_statement: OTHERWISE LBRACE function_prog RBRACE
                           | 
 
-func_match_statement: MATCH LPAREN expression RPAREN LBRACE CASE literals COLON function_prog func_case_tail func_match_default RBRACE
+func_switch_statement: SWITCH LPAREN expression RPAREN LBRACE CASE literals COLON function_prog func_case_tail func_switch_default RBRACE
 
 ?func_case_tail: CASE literals COLON function_prog func_case_tail
                 | 
 
-?func_match_default: DEFAULT COLON function_prog
+?func_switch_default: DEFAULT COLON function_prog
                      | 
 
 control_flow: EXIT SEMICOLON
@@ -297,19 +321,19 @@ func_loop_block: ( declarations
                  | control_flow )*
 
 conditional_func_loop_statement: func_loop_checkif_statement SEMICOLON?
-                                | func_loop_match_statement SEMICOLON?
+                                | func_loop_switch_statement SEMICOLON?
 
 func_loop_checkif_statement: CHECKIF LPAREN expression RPAREN LBRACE func_loop_block RBRACE func_loop_recheck_statement func_loop_otherwise_statement
 func_loop_recheck_statement: RECHECK LPAREN expression RPAREN LBRACE func_loop_block RBRACE func_loop_recheck_statement
                            |
 func_loop_otherwise_statement: OTHERWISE LBRACE func_loop_block RBRACE
                              |
-func_loop_match_statement: MATCH LPAREN expression RPAREN LBRACE CASE literals COLON func_loop_block func_loop_case_tail func_loop_match_default RBRACE
+func_loop_switch_statement: SWITCH LPAREN expression RPAREN LBRACE CASE literals COLON func_loop_block func_loop_case_tail func_loop_switch_default RBRACE
 
 func_loop_case_tail: CASE literals COLON func_loop_block func_loop_case_tail
                    |
 
-func_loop_match_default: DEFAULT COLON func_loop_block 
+func_loop_switch_default: DEFAULT COLON func_loop_block 
                    | 
 
 terminator: SEMICOLON
