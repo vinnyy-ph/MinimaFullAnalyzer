@@ -84,6 +84,12 @@ class Lexer:
     #--------------------------------------------------------------------------
     def keyword_check(self, value: str):
         
+        # ----- Starts with 'a' -----
+        if value[0] == 'a':
+            # Could be "abs"
+            if len(value) == 3 and value[1] == 'b' and value[2] == 's':
+                return 'abs'
+
         # ----- Check if it starts with 'c' -----
         if value[0] == 'c':
             if len(value) == 4 and value[1] == 'a' and value[2] == 's' and value[3] == 'e':
@@ -161,6 +167,8 @@ class Lexer:
                 return 'max'
             elif len(value) == 3 and value[1] == 'i' and value[2] == 'n':
                 return 'min'
+            elif len(value) == 5 and value[1] == 'a' and value[2] == 't' and value[3] == 'c' and value[4] == 'h':
+                return 'match'
 
         # ----- Starts with 'n' -----
         if value[0] == 'n':
@@ -196,13 +204,11 @@ class Lexer:
 
         # ----- Starts with 's' -----
         if value[0] == 's':
-            # Could be "show", "state", "switch", "sorted", "sum", "slice"
+            # Could be "show", "state", "sorted", "sum", "slice"
             if len(value) == 4 and value[1] == 'h' and value[2] == 'o' and value[3] == 'w':
                 return 'show'
             elif len(value) == 5 and value[1] == 't' and value[2] == 'a' and value[3] == 't' and value[4] == 'e':
                 return 'state'
-            elif len(value) == 6 and value[1] == 'w' and value[2] == 'i' and value[3] == 't' and value[4] == 'c' and value[5] == 'h':
-                return 'switch'
             elif len(value) == 6 and value[1] == 'o' and value[2] == 'r' and value[3] == 't' and value[4] == 'e' and value[5] == 'd':
                 return 'sorted'
             elif len(value) == 3 and value[1] == 'u' and value[2] == 'm':
@@ -220,12 +226,20 @@ class Lexer:
             elif len(value) == 4 and value[1] == 'y' and value[2] == 'p' and value[3] == 'e':
                 return 'type'
         
+           # ----- Starts with 'u' -----
+        if value[0] == 'u':
+            # Could be "unique" or "uppercase"
+            if len(value) == 6 and value[1] == 'n' and value[2] == 'i' and value[3] == 'q' and value[4] == 'u' and value[5] == 'e':
+                return 'unique'
+            elif len(value) == 9 and value[1] == 'p' and value[2] == 'p' and value[3] == 'e' and value[4] == 'r' and value[5] == 'c' and value[6] == 'a' and value[7] == 's' and value[8] == 'e':
+                return 'uppercase'
+            
         # ----- Starts with 'v' -----
         if value[0] == 'v':
             #could be "var"
             if len(value) == 3 and value[1] == 'a' and value[2] == 'r':
                 return 'var'
-
+            
         # ----- Starts with 'Y' -----
         if value[0] == 'Y':
             # Could be "YES"
