@@ -24,7 +24,11 @@ import {
   ListItemIcon,
   ListItemText,
   Divider,
-  Tooltip
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
@@ -37,6 +41,9 @@ import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
+import TableViewIcon from '@mui/icons-material/TableView';
+import CloseIcon from '@mui/icons-material/Close';
 
 const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
   const [code, setCode] = useState('');
@@ -54,6 +61,13 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
   const [inputPrompt, setInputPrompt] = useState('');
   const [executionId, setExecutionId] = useState(null);
   const [userInput, setUserInput] = useState('');
+  
+  // Add new state for AST and Symbol Table
+  const [astDialogOpen, setAstDialogOpen] = useState(false);
+  const [symbolTableDialogOpen, setSymbolTableDialogOpen] = useState(false);
+  const [ast, setAst] = useState(null);
+  const [astLoading, setAstLoading] = useState(false);
+  const [astError, setAstError] = useState(null);
   
   // Recent files state
   const [recentFiles, setRecentFiles] = useState([]);
@@ -470,6 +484,57 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     return new Date(b.lastOpened) - new Date(a.lastOpened);
   });
 
+  // Function to fetch and display the AST
+  const handleShowAst = () => {
+    setAstLoading(true);
+    setAstError(null);
+    
+    axios.post('http://localhost:5000/getAST', { code })
+      .then((response) => {
+        const data = response.data;
+        if (data.success) {
+          setAst(data.ast);
+          setAstDialogOpen(true);
+        } else {
+          setAstError(data.error || 'Failed to generate AST');
+        }
+        setAstLoading(false);
+      })
+      .catch((error) => {
+        console.error('Error fetching AST:', error);
+        setAstError('Error connecting to server: ' + error.message);
+        setAstLoading(false);
+      });
+  };
+  
+  const handleShowSymbolTable = () => {
+    // This will be implemented later when the semantic analyzer is provided
+    setSymbolTableDialogOpen(true);
+  };
+  
+  // Helper function to render the AST tree (recursive)
+  const renderAstNode = (node, index = 0) => {
+    if (!node) return null;
+    
+    return (
+      <Box key={index} sx={{ ml: 3 }}>
+        <Typography 
+          component="div" 
+          sx={{ 
+            fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
+            fontSize: '0.85rem',
+            color: theme.palette.mode === 'dark' ? '#9cdcfe' : '#0000ff',
+            fontWeight: node.children ? 'bold' : 'normal',
+            mt: 0.5
+          }}
+        >
+          {node.name}
+        </Typography>
+        {node.children && node.children.map((child, idx) => renderAstNode(child, `${index}-${idx}`))}
+      </Box>
+    );
+  };
+
   return (
     <div style={{ padding: '20px' }}>
       <Grid container spacing={2}>
@@ -873,6 +938,55 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                               />
                             </Box>
                           )}
+                          
+                          {/* Add AST and Symbol Table buttons */}
+                          {!waitingForInput && (
+                            <Box 
+                              sx={{ 
+                                display: 'flex', 
+                                justifyContent: 'center', 
+                                gap: 2,
+                                mt: 3,
+                                pb: 1
+                              }}
+                            >
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<AccountTreeIcon />}
+                                onClick={handleShowAst}
+                                disabled={astLoading || errors.length > 0}
+                                sx={{
+                                  textTransform: 'none',
+                                  borderColor: theme.palette.primary.main,
+                                  color: theme.palette.primary.main,
+                                  '&:hover': {
+                                    backgroundColor: theme.palette.primary.main + '1A',  // 10% opacity
+                                  }
+                                }}
+                              >
+                                {astLoading ? 'Loading...' : 'Show AST'}
+                              </Button>
+                              
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<TableViewIcon />}
+                                onClick={handleShowSymbolTable}
+                                disabled={errors.length > 0}
+                                sx={{
+                                  textTransform: 'none',
+                                  borderColor: theme.palette.secondary.main,
+                                  color: theme.palette.secondary.main,
+                                  '&:hover': {
+                                    backgroundColor: theme.palette.secondary.main + '1A',  // 10% opacity
+                                  }
+                                }}
+                              >
+                                Show Symbol Table
+                              </Button>
+                            </Box>
+                          )}
                         </Box>
                       ) : (
                         // Empty state - no program output yet
@@ -989,6 +1103,176 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
           </Paper>
         </Grid>
       </Grid>
+
+      {/* AST Dialog */}
+      <Dialog
+        open={astDialogOpen}
+        onClose={() => setAstDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: theme.palette.background.paper,
+            borderRadius: 2,
+            boxShadow: 24,
+          }
+        }}
+      >
+        <DialogTitle sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          borderBottom: `1px solid ${theme.palette.divider}`,
+          pb: 1
+        }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <AccountTreeIcon sx={{ mr: 1, color: theme.palette.primary.main }} />
+            <Typography variant="h6" component="div">
+              Abstract Syntax Tree (AST)
+            </Typography>
+          </Box>
+          <IconButton
+            edge="end"
+            color="inherit"
+            onClick={() => setAstDialogOpen(false)}
+            aria-label="close"
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent 
+          dividers 
+          sx={{ 
+            backgroundColor: theme.palette.mode === 'dark' ? '#1a1a1a' : '#f5f5f5',
+            p: 3
+          }}
+        >
+          {astError ? (
+            <Box sx={{ color: 'error.main', p: 2 }}>
+              <Typography variant="subtitle1" fontWeight="bold">Error</Typography>
+              <Typography variant="body2">{astError}</Typography>
+            </Box>
+          ) : ast ? (
+            <Box 
+              sx={{ 
+                padding: 2,
+                borderRadius: 1,
+                border: `1px solid ${theme.palette.divider}`,
+                backgroundColor: theme.palette.mode === 'dark' ? '#121212' : '#ffffff',
+                maxHeight: '60vh',
+                overflow: 'auto',
+                '&::-webkit-scrollbar': { width: '10px' },
+                '&::-webkit-scrollbar-track': { 
+                  background: theme.palette.mode === 'dark' ? '#2e2e2e' : '#eaeaea', 
+                  borderRadius: '4px' 
+                },
+                '&::-webkit-scrollbar-thumb': {
+                  backgroundColor: theme.palette.mode === 'dark' ? '#555' : '#aaa',
+                  borderRadius: '10px',
+                  border: `2px solid ${theme.palette.mode === 'dark' ? '#2e2e2e' : '#eaeaea'}`,
+                }
+              }}
+            >
+              <Typography 
+                variant="subtitle1" 
+                sx={{ 
+                  mb: 2, 
+                  fontWeight: 'bold',
+                  color: theme.palette.primary.main
+                }}
+              >
+                Parse Tree Structure
+              </Typography>
+              {renderAstNode(ast)}
+            </Box>
+          ) : (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+              <CircularProgress />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button 
+            onClick={() => setAstDialogOpen(false)} 
+            variant="contained"
+            color="primary"
+          >
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Symbol Table Dialog (placeholder for now) */}
+      <Dialog
+        open={symbolTableDialogOpen}
+        onClose={() => setSymbolTableDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: theme.palette.background.paper,
+            borderRadius: 2,
+            boxShadow: 24,
+          }
+        }}
+      >
+        <DialogTitle sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          borderBottom: `1px solid ${theme.palette.divider}`,
+          pb: 1
+        }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <TableViewIcon sx={{ mr: 1, color: theme.palette.secondary.main }} />
+            <Typography variant="h6" component="div">
+              Symbol Table
+            </Typography>
+          </Box>
+          <IconButton
+            edge="end"
+            color="inherit"
+            onClick={() => setSymbolTableDialogOpen(false)}
+            aria-label="close"
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent 
+          dividers 
+          sx={{ 
+            backgroundColor: theme.palette.mode === 'dark' ? '#1a1a1a' : '#f5f5f5',
+            p: 3
+          }}
+        >
+          <Box 
+            sx={{ 
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              p: 4
+            }}
+          >
+            <TableViewIcon sx={{ fontSize: '3rem', color: 'text.secondary', mb: 2 }} />
+            <Typography variant="h6" sx={{ mb: 1 }}>
+              Symbol Table Coming Soon
+            </Typography>
+            <Typography variant="body2" align="center" color="text.secondary">
+              This feature will be implemented when the semantic analyzer is provided.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button 
+            onClick={() => setSymbolTableDialogOpen(false)} 
+            variant="contained"
+            color="primary"
+          >
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 };

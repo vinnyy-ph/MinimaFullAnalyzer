@@ -62,6 +62,63 @@ def analyze_full():
         'semanticErrors': semantic_errors,
         'terminalOutput': terminal_output
     })
+@app.route('/getAST', methods=['POST'])
+def get_ast():
+    data = request.get_json()
+    code = data.get('code', '')
+    
+    if not code:
+        return jsonify({
+            'success': False,
+            'error': 'No code provided'
+        })
+    
+    try:
+        # First check for lexical errors
+        lexer = Lexer(code)
+        all_tokens = lexer.tokenize_all()
+        lexical_errors = lexer.errors
+        
+        if lexical_errors:
+            return jsonify({
+                'success': False,
+                'error': 'Lexical errors detected. Cannot generate AST.'
+            })
+        
+        # If no lexical errors, try to parse
+        success, result = analyze_syntax(code)
+        if not success:
+            return jsonify({
+                'success': False,
+                'error': 'Syntax errors detected. Cannot generate AST.',
+                'syntaxError': result
+            })
+        
+        # Convert the parse tree to a JSON-friendly format
+        def process_tree(node):
+            if hasattr(node, 'data') and hasattr(node, 'children'):
+                return {
+                    'name': str(node.data),
+                    'children': [process_tree(child) for child in node.children]
+                }
+            elif hasattr(node, 'value') and hasattr(node, 'type'):
+                return {
+                    'name': f"{node.type}: {node.value}"
+                }
+            else:
+                return {'name': str(node)}
+        
+        ast_json = process_tree(result)
+        
+        return jsonify({
+            'success': True,
+            'ast': ast_json
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error generating AST: {str(e)}'
+        })
 @app.route('/executeCode', methods=['POST'])
 def execute_code_route():
     data = request.json
