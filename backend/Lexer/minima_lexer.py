@@ -498,26 +498,33 @@ class Lexer:
         return T('COMMENT', comment_value, start_line, start_column)
 
     def handle_state_reading_identifier(self, start_line, start_column):
-        value = ""
-        # 1. Gather all valid characters for the identifier
+        # Check if the first character is valid (must be lowercase)
+        if self.current_char not in ATOMS['alphabet'] or not self.current_char.islower():
+            error_msg = f"Invalid identifier start: '{self.current_char}' - identifiers must start with lowercase letter"
+            error = InvalidIdentifierError(self.current_char, self.line, self.column, error_msg)
+            self.errors.append(error)
+            invalid_char = self.current_char
+            self.advance()
+            self.current_state = LexerState.INITIAL
+            return T('INVALID', invalid_char, start_line, start_column, error=error_msg)
+        
+        # If we reach here, the first character is valid
+        value = self.current_char
+        self.advance()
+        
+        # Continue gathering valid characters for the identifier
+        # Valid characters include lowercase, uppercase, digits, and underscores
         while self.current_char is not None:
-            if self.current_char in ATOMS['alphanumeric'] or self.current_char == '_':
+            if (self.current_char.islower() or 
+                self.current_char.isupper() or 
+                self.current_char.isdigit() or 
+                self.current_char == '_'):
                 value += self.current_char
                 self.advance()
             else:
                 break
     
-        # New check for invalid character that didn't match any valid identifier char.
-        if not value:
-            msg = f"Invalid character '{self.current_char}' encountered"
-            error = InvalidSymbolError(self.current_char, self.line, self.column)
-            error.message = msg
-            self.errors.append(error)
-            self.advance()
-            self.current_state = LexerState.INITIAL
-            return self.get_next_token()
-            
-        # 2. Check if the gathered value is a keyword
+        # Check if the gathered value is a keyword
         token_type = self.keyword_check(value)
         if token_type:
             # -- It's a keyword --
@@ -540,48 +547,35 @@ class Lexer:
             return T(token_type, value, start_line, start_column)
     
         else:
-            # 3. Not a keyword => treat as identifier
-            errors_in_identifier = []
-            
-            if not value or not value[0].islower():
-                errors_in_identifier.append("must start with a lowercase letter")
+            # The identifier is not a keyword, check for length errors
             if len(value) > 20:
-                errors_in_identifier.append("cannot exceed 20 characters")
-    
-            if errors_in_identifier:
-                # Invalid identifier
-                error_msg = f"Invalid identifier '{value}': " + "; ".join(errors_in_identifier)
-                error = InvalidIdentifierError(value, start_line, start_column)
-                error.message = error_msg
+                error_msg = f"Identifier '{value}' exceeds maximum length of 20 characters"
+                error = InvalidIdentifierError(value, start_line, start_column, error_msg)
                 self.errors.append(error)
+                # Return the identifier with an error instead of skipping it
                 self.current_state = LexerState.INITIAL
-                return self.get_next_token()
+                return T('INVALID', value, start_line, start_column, error=error_msg)
     
-            else:
-                # 4. Check delimiter for a valid identifier
-                if self.current_char is not None:
-                    two_char = self.current_char
-                    if self.peek_next_char():
-                        two_char += self.peek_next_char()
-                    
-                    if (self.current_char not in valid_delimiters_identifier and
-                        two_char not in valid_delimiters_identifier):
-                        error_msg = (
-                            f"Invalid delimiter after identifier '{value}': '{self.current_char}'"
-                        )
-                        error = InvalidSymbolError(self.current_char, self.line, self.column)
-                        error.message = error_msg
-                        self.errors.append(error)
-                        self.advance()
-                        self.current_state = LexerState.INITIAL
-                        return self.get_next_token()
+            # Check delimiter for a valid identifier
+            if self.current_char is not None:
+                two_char = self.current_char
+                if self.peek_next_char():
+                    two_char += self.peek_next_char()
+                
+                if (self.current_char not in valid_delimiters_identifier and
+                    two_char not in valid_delimiters_identifier):
+                    error_msg = f"Invalid delimiter after identifier '{value}': '{self.current_char}'"
+                    error = InvalidSymbolError(self.current_char, self.line, self.column)
+                    error.message = error_msg
+                    self.errors.append(error)
+                    self.advance()
+                    self.current_state = LexerState.INITIAL
+                    return self.get_next_token()
     
-                # 5. We have a valid identifier and a valid delimiter.
-                #    Get or create a numeric label for this identifier.
-                identifier_label = self.get_identifier_label(value)
-                self.current_state = LexerState.INITIAL
-                return T(identifier_label, value, start_line, start_column)
-
+            # We have a valid identifier and a valid delimiter.
+            identifier_label = self.get_identifier_label(value)
+            self.current_state = LexerState.INITIAL
+            return T(identifier_label, value, start_line, start_column)
 
     def handle_state_reading_int(self, start_line, start_column):
         value = ""
