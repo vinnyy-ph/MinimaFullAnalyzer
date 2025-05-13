@@ -1,13 +1,14 @@
 valid_delimiters_identifier = [
     ' ', '\n', '\t', ';', ',', ')', '}', '(', '{', '[', ']', ':',
     '=', '+', '-', '*', '/', '%', '!', '>', '<', '&', '|', '#'
-]
+] # a list of delimiters for identifiers
 
 valid_delimiters_numeric = [
     '\n',' ', '\t', '+', '-', '*', '/', '%', ',', '=', '!',
     '<', '>', ')', ']', '}', ';', ':', '|', '&', '#'
-]
+] # a list of delimiters for numeric literals
 
+# a dictionary mapping of keywords to their valid delimiters
 valid_delimiters_keywords_dict = {
     'get': [ ' ', '(' , '#', '\n', '\t'],
     'show': [ ' ', '(', '#', '\n', '\t' ],
@@ -44,7 +45,6 @@ valid_delimiters_keywords_dict = {
     'abs': [ ' ', '(', '#', '\n', '\t' ],
     'sum': [ ' ', '(', '#', '\n', '\t' ],
     'contains': [ ' ', '(', '#', '\n', '\t' ],
-    'indexOf': [ ' ', '(', '#', '\n', '\t' ],
     'join': [ ' ', '(', '#', '\n', '\t' ],
     'slice': [ ' ', '(', '#', '\n', '\t' ],
     'unique': [ ' ', '(', '#', '\n', '\t' ],
@@ -57,6 +57,7 @@ valid_delimiters_keywords_dict = {
     'round': [ ' ', '(', '#', '\n', '\t' ],
 }
 
+# a dictionary mapping of symbols to their valid delimiters
 valid_delimiters_symbol_dict = {
     '=':  [' ', '"', '(', '{', '-', 'Y', 'N', '#', '\n', '\t', '!', '[']
             + list('abcdefghijklmnopqrstuvwxyz0123456789'),

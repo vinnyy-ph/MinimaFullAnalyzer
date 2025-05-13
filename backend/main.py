@@ -4,11 +4,11 @@ from backend.Lexer.minima_lexer import Lexer
 from backend.Syntax.syntax_analyzer import analyze_syntax, parser
 from backend.Semantic.semantic_analyzer import SemanticAnalyzer 
 from backend.CodegenTAC.code_executor import execute_code, format_tac_instructions
+from backend.CodegenTAC.built_in_functions import MinimaBultins
 import io
 import sys
 import uuid
 from contextlib import redirect_stdout
-from backend.CodegenTAC.built_in_functions import MinimaBultins
 app = Flask(__name__)
 CORS(app)
 execution_states = {}
@@ -23,16 +23,16 @@ def analyze_full():
         tokens = []
         for token in all_tokens:
             tokens.append({
-                'type': token.type,
-                'value': token.value,
-                'line': token.line,
-                'column': token.column
+                'type': token.type, # could be IDENTIFIER, INTEGERLITERAL, etc.
+                'value': token.value, # the actual value of the token, examples are x, 123, etc.
+                'line': token.line, # the line number where the token was found
+                'column': token.column # the column number where the token was found
             })
         
         lexical_errors = [error.to_dict() for error in lexer.errors]
         syntax_errors = []
-        semantic_errors = []
-        if not lexical_errors:
+        semantic_errors  = []
+        if not lexical_errors: #if lexical_errors dictionary is empty, continue with syntax analysis
             success, result = analyze_syntax(code)
             if success:
                 parse_tree = result
