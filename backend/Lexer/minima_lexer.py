@@ -283,6 +283,26 @@ class Lexer:
                     last_token_is_id = last_token_type.startswith('IDENTIFIER_')
                     last_token_is_num = last_token_type in ['INTEGERLITERAL', 'POINTLITERAL']
                     
+                    # Detect if we're in a context likely to cause parser issues
+                    in_function_call = False
+                    in_expression_context = False
+                    
+                    # Check for function call context
+                    for i in range(len(self.token_buffer) - 1, -1, -1):
+                        if self.token_buffer[i].type == '(' and i > 0 and self.token_buffer[i-1].value in ['show', 'get', 'checkif', 'recheck', 'match']:
+                            in_function_call = True
+                            break
+                        elif self.token_buffer[i].type == ')':
+                            # We've gone too far back, past a closed parenthesis
+                            break
+                    
+                    # Check for expression context
+                    if len(self.token_buffer) > 0:
+                        last_token = self.token_buffer[-1]
+                        if (last_token.type in ['+', '-', '*', '/', '%', '=', '==', '!=', '<', '>', '<=', '>=', '&&', '||', '('] or
+                            last_token.value in ['=', '+=', '-=', '*=', '/=']):
+                            in_expression_context = True
+                    
                     # Check for different dash patterns with identifier or number prefix
                     if last_token_is_id or last_token_is_num:
                         if peek_sequence == '-':  # a-1 case: Just a minus
@@ -291,18 +311,57 @@ class Lexer:
                             return T('-', '-', start_line, start_column)
                             
                         elif peek_sequence == '--':  # a-- case: Decrement operator
-                            self.advance()  # first '-'
-                            self.advance()  # second '-'
-                            self.current_state = LexerState.INITIAL
-                            return T('--', '--', start_line, start_column)
+                            # If this might be followed by a negative number
+                            if (in_function_call or in_expression_context) and self.peek_next_char() == '-' and self.peek_next_char(2) and self.peek_next_char(2).isdigit():
+                                # This is a case like "show(a--1)" which should be "a - -1"
+                                # Add a warning
+                                error_msg = "Ambiguous syntax: '--' followed by digit may be interpreted incorrectly. Use spaces 'a - -1' or parentheses 'a-(-1)' for clarity."
+                                error = LexerError(error_msg, self.line, self.column, 'Syntax Suggestion')
+                                self.errors.append(error)
+                                
+                                self.advance()  # consume first '-'
+                                self.current_state = LexerState.INITIAL
+                                return T('-', '-', start_line, start_column)
+                            else:
+                                # Regular decrement operator
+                                self.advance()  # first '-'
+                                self.advance()  # second '-'
+                                self.current_state = LexerState.INITIAL
+                                return T('--', '--', start_line, start_column)
                             
                         elif peek_sequence == '--D':  # a--1 case: Should be a, -, -1
-                            # Return just the first minus, the rest will be handled separately
-                            self.advance()  # consume first '-'
-                            self.current_state = LexerState.INITIAL
-                            return T('-', '-', start_line, start_column)
+                            # Add custom warning for all ambiguous syntax patterns
+                            if (in_function_call or in_expression_context):
+                                error_msg = "Ambiguous syntax: 'a--1' will be interpreted as 'a - (-1)' but might cause parser errors. Use spaces 'a - -1' or parentheses 'a-(-1)' for clarity."
+                                error = LexerError(error_msg, self.line, self.column, 'Syntax Suggestion')
+                                self.errors.append(error)
+                            
+                            # Prioritize subtraction of negative in function calls and expressions
+                            if in_function_call or in_expression_context:
+                                # Interpret as a - (-1)
+                                self.advance()  # consume first '-'
+                                self.current_state = LexerState.INITIAL
+                                return T('-', '-', start_line, start_column)
+                            else:
+                                # For other contexts, scan ahead to disambiguate
+                                if self.peek_next_char() == '-' and self.peek_next_char(2) and self.peek_next_char(2).isdigit():
+                                    # This is likely a subtraction of negative number
+                                    self.advance()  # consume first '-'
+                                    self.current_state = LexerState.INITIAL
+                                    return T('-', '-', start_line, start_column)
+                                else:
+                                    # Default to decrement
+                                    self.advance()  # first '-'
+                                    self.advance()  # second '-'
+                                    self.current_state = LexerState.INITIAL
+                                    return T('--', '--', start_line, start_column)
                             
                         elif peek_sequence == '---D':  # a---1 case: Should be a, --, -, 1
+                            # Add warning about complex dash sequences
+                            error_msg = "Complex dash sequence '---' detected. Consider using spaces or parentheses for clarity."
+                            error = LexerError(error_msg, self.line, self.column, 'Syntax Suggestion')
+                            self.errors.append(error)
+                            
                             # Return the decrement operator first
                             self.advance()  # first '-'
                             self.advance()  # second '-'
@@ -310,6 +369,11 @@ class Lexer:
                             return T('--', '--', start_line, start_column)
                             
                         elif peek_sequence == '----D':  # a----1 case: Should be a, --, -, -1
+                            # Add warning about very complex dash sequences
+                            error_msg = "Very complex dash sequence '----' detected. Use parentheses or spaces to clearly express your intention."
+                            error = LexerError(error_msg, self.line, self.column, 'Syntax Suggestion')
+                            self.errors.append(error)
+                            
                             # First return the decrement
                             self.advance()  # first '-'
                             self.advance()  # second '-'
@@ -969,8 +1033,8 @@ class Lexer:
         Repeatedly calls get_next_token until None is returned.
         Returns a list of tokens.
         """
-        self.token_buffer = []
-        while True:
+        self.token_buffer = [] #empty token_buffer to store tokens
+        while True: 
             token = self.get_next_token()
             if token is None:
                 # End of input
