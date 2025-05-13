@@ -1,7 +1,7 @@
 from lark import Visitor
 import uuid
 class TACGenerator(Visitor):
-    def __init__(self):
+    def __init__(self, debug_mode=False):
         super().__init__()
         self.instructions = []
         self.temp_counter = 0
@@ -12,6 +12,7 @@ class TACGenerator(Visitor):
         self.control_stack = []
         self.variable_types = {}
         self.values = {}
+        self.debug_mode = debug_mode
     def push_loop(self, start_label, end_label):
         """Push a new loop context onto the stack."""
         self.loop_stack.append((start_label, end_label))
@@ -40,25 +41,42 @@ class TACGenerator(Visitor):
         return instruction
     def debug_print_tree(self, node, depth=0):
         """Debug function to print the AST structure"""
-        if hasattr(node, 'data'):
-            print(" " * depth + f"Node type: {node.data}")
-            for child in node.children:
-                self.debug_print_tree(child, depth + 2)
-        elif hasattr(node, 'type'):
-            value = getattr(node, 'value', '')
-            print(" " * depth + f"Token: {node.type} = {value}")
-        else:
-            print(" " * depth + f"Unknown node: {node}")
+        if self.debug_mode:  # Only print when debug mode is enabled
+            if hasattr(node, 'data'):
+                print(" " * depth + f"Node type: {node.data}")
+                for child in node.children:
+                    self.debug_print_tree(child, depth + 2)
+            elif hasattr(node, 'type'):
+                value = getattr(node, 'value', '')
+                print(" " * depth + f"Token: {node.type} = {value}")
+            else:
+                print(" " * depth + f"Unknown node: {node}")
     def generate(self, tree):
-        print("DEBUG: AST Structure:")
-        self.debug_print_tree(tree)
-        """Main entry point to generate TAC from parse tree."""
+        """
+        Main entry point to generate TAC from parse tree.
+        Traverses the AST in a depth-first manner, following operator precedence.
+        """
+        # Debug info
+        if self.debug_mode:
+            print("DEBUG: AST Structure:")
+            self.debug_print_tree(tree)
+        
+        # Reset internal state
         self.instructions = []
         self.temp_counter = 0
         self.label_counter = 0
         self.variable_types = {}
-        self.values = {}  
+        self.values = {}
+        
+        # Start traversal
         self.visit(tree)
+        
+        # Print out the generated TAC instructions for debugging
+        if self.debug_mode:
+            print("\nGenerated TAC instructions:")
+            for i, (op, arg1, arg2, result) in enumerate(self.instructions):
+                print(f"{i}: {op} {arg1}, {arg2}, {result}")
+        
         return self.instructions
     def get_type(self, node_or_value):
         """Attempt to determine the type of a node or value."""
@@ -78,16 +96,21 @@ class TACGenerator(Visitor):
             return "text"
         return "unknown"
     def visit(self, tree):
-        """Visit a node in the parse tree."""
+        """
+        Visit a node in the parse tree. This is the main traversal method that follows
+        the tree structure and ensures proper ordering of operations.
+        """
         if not hasattr(tree, "data"):
             if hasattr(tree, "type"):
                 return self.visit_token(tree)
             return None
+        
         method_name = f"visit_{tree.data}"
         if hasattr(self, method_name):
             method = getattr(self, method_name)
             return method(tree)
         else:
+            # Default handling for nodes without specific visit methods
             result = None
             for child in tree.children:
                 if hasattr(child, "data") or hasattr(child, "type"):
@@ -315,7 +338,16 @@ class TACGenerator(Visitor):
             return ('text', "")
         return self.visit(node.children[0])
     def visit_expression(self, node):
-        """Visit an expression node."""
+        """
+        Visit an expression node. Expressions follow the precedence rules in the grammar:
+        1. Parentheses (highest)
+        2. Multiplication/Division
+        3. Addition/Subtraction 
+        4. Relational operators (< <= > >=)
+        5. Equality operators (== !=)
+        6. Logical AND
+        7. Logical OR (lowest)
+        """
         if hasattr(node.children[0], 'data') and node.children[0].data == 'id_usage':
             id_usage_node = node.children[0]
             if (len(id_usage_node.children) > 0 and 
@@ -342,6 +374,9 @@ class TACGenerator(Visitor):
                     temp = self.get_temp()
                     self.emit('INPUT', prompt, None, temp)
                     return ('text', temp)  
+        
+        # Process the expression following precedence rules by visiting the first child,
+        # which will be the highest-precedence expression according to the grammar hierarchy
         result = self.visit(node.children[0])
         return result
     def visit_logical_or_expr(self, node):
@@ -409,12 +444,16 @@ class TACGenerator(Visitor):
             self.emit('GE', left_operand, right_operand, temp)
         return temp
     def visit_add_expr(self, node):
+        """
+        Process addition/subtraction expressions. Addition has lower precedence than multiplication,
+        so multiplication/division will be processed before addition/subtraction.
+        """
         children = node.children
-        left = self.visit(children[0])
+        left = self.visit(children[0])  # Visit left operand first (should be multiplication expression)
         i = 1
         while i < len(children):
             op = children[i].value  
-            right = self.visit(children[i+1])
+            right = self.visit(children[i+1])  # Visit right operand
             temp = self.get_temp()
             left_operand = left[1] if isinstance(left, tuple) else left
             right_operand = right[1] if isinstance(right, tuple) else right
@@ -446,11 +485,17 @@ class TACGenerator(Visitor):
             i += 2
         return left
     def visit_mul_expr(self, node):
+        """
+        Process multiplication/division expressions. Multiplication has higher precedence than addition,
+        so these expressions are evaluated before addition/subtraction.
+        """
         children = node.children
+        # Visit the leftmost operand first (which could be a primary expression)
         left = self.visit(children[0])
         i = 1
         while i < len(children):
             op = children[i].value
+            # Visit each right operand (which could be primary expressions)
             right = self.visit(children[i+1])
             temp = self.get_temp()
             left_operand = left[1] if isinstance(left, tuple) else left
@@ -495,10 +540,32 @@ class TACGenerator(Visitor):
                 self.variable_types[temp] = "integer"
         return temp
     def visit_primary_expr(self, node):
+        """
+        Visit a primary expression, which can be an operand or a parenthesized expression.
+        For parenthesized expressions, we process the inner expression first, following precedence.
+        """
         if len(node.children) == 1:
+            # This is a simple operand
             return self.visit(node.children[0])
         else:
-            return self.visit(node.children[1])
+            # This is a parenthesized expression (LPAREN expression RPAREN)
+            if self.debug_mode:
+                print(f"Processing parenthesized expression at depth {getattr(node, 'depth', 'unknown')}")
+            
+            # First, evaluate the inner expression
+            expr_result = self.visit(node.children[1])
+            
+            # For complex expressions, we might want to create a new temporary variable
+            # to make the parenthesized nature of the expression clearer in the TAC
+            if isinstance(expr_result, str) and expr_result.startswith('t'):
+                # Already a temporary, no need for another level of indirection
+                return expr_result
+            else:
+                # Create a new temporary to emphasize the parenthesized computation
+                temp = self.get_temp()
+                value = expr_result[1] if isinstance(expr_result, tuple) else expr_result
+                self.emit('ASSIGN', value, None, temp)
+                return temp
     def visit_operand(self, node):
         if (hasattr(node.children[0], 'type') and node.children[0].type == 'GET' and
                 len(node.children) >= 4 and  

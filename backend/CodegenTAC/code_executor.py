@@ -67,13 +67,14 @@ def format_minima_output(output_text):
         return f"{whole}.{decimal}"
     formatted_text = re.sub(r'((?:-)?\d+)\.(\d{10,})', trim_decimals, formatted_text)
     return formatted_text
-def execute_code(code, execution_id=None, user_input=None):
+def execute_code(code, execution_id=None, user_input=None, debug_mode=False):
     """
     Execute Minima code and return the results.
     Args:
         code (str): The Minima code to execute
         execution_id (str, optional): Execution ID if resuming with input
         user_input (str, optional): User input if resuming execution
+        debug_mode (bool, optional): Enable debug output
     Returns:
         dict: A dictionary containing execution results and metadata
     """
@@ -88,6 +89,11 @@ def execute_code(code, execution_id=None, user_input=None):
         'executionId': None,
         'terminalOutput': ''
     }
+    
+    # Apply debug mode if requested
+    if debug_mode:
+        results['terminalOutput'] += "Running in debug mode\n"
+    
     interpreter = None
     if execution_id and execution_id in execution_states:
         interpreter, state = execution_states.pop(execution_id)
@@ -140,12 +146,13 @@ def execute_code(code, execution_id=None, user_input=None):
         if semantic_errors:
             results['error'] = 'Semantic Errors: ' + ', '.join(error.message for error in semantic_errors)
             return results
-        code_generator = TACGenerator()
+        code_generator = TACGenerator(debug_mode=debug_mode)
         tac_instructions = code_generator.generate(parse_tree)
         results['tac'] = tac_instructions
         results['formattedTAC'] = format_tac_instructions(tac_instructions)
         results['terminalOutput'] += f"Generated {len(tac_instructions)} TAC instructions.\n"
         interpreter = TACInterpreter().load(tac_instructions)
+        interpreter.debug_mode = debug_mode
         max_steps = float('inf')
         interpreter.max_execution_steps = max_steps
         start_time = time.time()
