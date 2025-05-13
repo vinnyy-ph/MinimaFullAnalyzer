@@ -67,8 +67,8 @@ TEXT: "text"
 IDENTIFIER: /(?!(?:var|fixed|group|func|throw|show|checkif|recheck|otherwise|match|case|default|exit|next|each|repeat|do|integer|point|state|text|empty|get)(?![a-zA-Z0-9_]))[a-z][a-zA-Z0-9_]*/
 INTEGERLITERAL: /[0-9]{1,9}/
 POINTLITERAL: /[0-9]{1,9}\.[0-9]{1,9}/
-NEGINTEGERLITERAL: /~[0-9]{1,9}/
-NEGPOINTLITERAL: /~[0-9]{1,9}\.[0-9]{1,9}/
+NEGINTEGERLITERAL: /-[0-9]{1,9}/
+NEGPOINTLITERAL: /-[0-9]{1,9}\.[0-9]{1,9}/
 TEXTLITERAL: /"(\\.|[^"\\])*"/
 STATELITERAL: "YES" | "NO"
 

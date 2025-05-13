@@ -12,9 +12,9 @@ execution_states = {}
 def format_minima_number(value):
     """
     Format a number for output according to Minima language rules.
-    - Use tilde (~) for negative numbers
+    - Use hyphen (-) for negative numbers
     - Limit decimal places to maximum of 9 digits
-    - Ensure integers are within ~999999999 to 999999999
+    - Ensure integers are within -999999999 to 999999999
     """
     if not isinstance(value, (int, float)):
         return value
@@ -22,14 +22,14 @@ def format_minima_number(value):
         value = int(value)
     if value < 0:
         if isinstance(value, float):
-            formatted = f"~{abs(value):.9f}".rstrip('0').rstrip('.')
+            formatted = f"-{abs(value):.9f}".rstrip('0').rstrip('.')
             parts = formatted.split('.')
             if len(parts) > 1 and len(parts[1]) > 9:
                 parts[1] = parts[1][:9]
-                formatted = f"~{parts[0]}.{parts[1]}"
+                formatted = f"-{parts[0]}.{parts[1]}"
             return formatted
         else:
-            return f"~{abs(value)}"
+            return f"-{abs(value)}"
     else:
         if isinstance(value, float):
             formatted = f"{value:.9f}".rstrip('0').rstrip('.')
@@ -42,7 +42,7 @@ def format_minima_number(value):
             return str(value)
 def format_minima_output(output_text):
     """
-    Ensure all negative numbers in output are displayed with tilde notation.
+    Ensure all negative numbers in output are displayed with hyphen notation.
     This provides a second layer of formatting in case the interpreter missed anything.
     Also trims any decimal places to max 9 digits.
     """
@@ -53,19 +53,19 @@ def format_minima_output(output_text):
             parts = number.split('.')
             if len(parts) > 1 and len(parts[1]) > 9:
                 parts[1] = parts[1][:9]
-            return f"~{parts[0]}.{parts[1]}" if len(parts) > 1 else f"~{parts[0]}"
+            return f"-{parts[0]}.{parts[1]}" if len(parts) > 1 else f"-{parts[0]}"
         else:  
-            return f"~{number}"
+            return f"-{number}"
     formatted_text = re.sub(r'(?<!\w)-(\d+(?:\.\d+)?)', replace_negatives, output_text)
-    formatted_text = re.sub(r'(^|\s+)-(\d+(?:\.\d+)?)', lambda m: m.group(1) + "~" + m.group(2), formatted_text)
-    formatted_text = re.sub(r'([\[\(,])-(\d+(?:\.\d+)?)', lambda m: m.group(1) + "~" + m.group(2), formatted_text)
+    formatted_text = re.sub(r'(^|\s+)-(\d+(?:\.\d+)?)', lambda m: m.group(1) + "-" + m.group(2), formatted_text)
+    formatted_text = re.sub(r'([\[\(,])-(\d+(?:\.\d+)?)', lambda m: m.group(1) + "-" + m.group(2), formatted_text)
     def trim_decimals(match):
         whole = match.group(1)
         decimal = match.group(2)
         if len(decimal) > 9:
             decimal = decimal[:9]
         return f"{whole}.{decimal}"
-    formatted_text = re.sub(r'((?:~)?\d+)\.(\d{10,})', trim_decimals, formatted_text)
+    formatted_text = re.sub(r'((?:-)?\d+)\.(\d{10,})', trim_decimals, formatted_text)
     return formatted_text
 def execute_code(code, execution_id=None, user_input=None):
     """

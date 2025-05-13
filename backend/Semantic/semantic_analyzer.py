@@ -92,9 +92,9 @@ class SemanticAnalyzer(Visitor):
         Manually infer type and value from a raw string literal.
         Expected formats:
           - Integer literal: "2"
-          - Negative integer literal: "~2"
+          - Negative integer literal: "-2"
           - Floating point literal: "2.0"
-          - Negative floating point literal: "~2.0"
+          - Negative floating point literal: "-2.0"
           - Text literal: "\"string\""
           - State literal: "YES" or "NO"
           - Empty literal: "empty" (case-insensitive)
@@ -112,13 +112,13 @@ class SemanticAnalyzer(Visitor):
             return "text", s[1:-1]
         if s in ["YES", "NO"]:
             return ("state", s)
-        m = re.fullmatch(r'^~(\d+)$', s)
+        m = re.fullmatch(r'^-(\d+)$', s)
         if m:
             return "integer", -int(m.group(1))
         m = re.fullmatch(r'^(\d+)$', s)
         if m:
             return "integer", int(m.group(1))
-        m = re.fullmatch(r'^~(\d+\.\d+)$', s)
+        m = re.fullmatch(r'^-(\d+\.\d+)$', s)
         if m:
             return "point", -float(m.group(1))
         m = re.fullmatch(r'^(\d+\.\d+)$', s)
@@ -573,12 +573,18 @@ class SemanticAnalyzer(Visitor):
             if op_token.value == "!":
                 result_bool = not self.to_state(expr)
                 result = ("state", "YES" if result_bool else "NO")
-            elif op_token.value == "~":
-                typ, val = expr
-                if typ == "state":
+            elif op_token.value == "-":
+                typ, val = expr if isinstance(expr, tuple) and len(expr) >= 2 else ("unknown", None)
+                if val is None:
+                    result = ("unknown", None)
+                elif typ == "state":
                     result = ("integer", -convert_state_to_int(val))
                 else:
-                    result = (typ, -val)
+                    try:
+                        result = (typ, -val)
+                    except:
+                        # If we can't negate the value, return an unknown type
+                        result = ("unknown", None)
         self.values[id(node)] = result
         return result
     def visit_primary_expr(self, node):
