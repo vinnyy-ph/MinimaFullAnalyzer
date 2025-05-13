@@ -63,12 +63,12 @@ class TACInterpreter:
             value = int(value)
         if isinstance(value, int):
             if value < 0:
-                return f"~{abs(value)}"
+                return f"-{abs(value)}"
             return str(value)
         if value < 0:
             formatted = f"{abs(value):.{self.max_digits}f}".rstrip('0').rstrip('.')
             if formatted == "0.": formatted = "0"
-            return f"~{formatted}"
+            return f"-{formatted}"
         else:
             formatted = f"{value:.{self.max_digits}f}".rstrip('0').rstrip('.')
             if formatted == "0.": formatted = "0"
@@ -117,7 +117,7 @@ class TACInterpreter:
                 return True
             if val == 'NO':
                 return False
-            if val.startswith('~'):
+            if val.startswith('-'):
                 num_part = val[1:]
                 if num_part.isdigit():
                     try:
@@ -324,15 +324,16 @@ class TACInterpreter:
     def validate_and_parse_input(self, input_str, expected_type=None):
         """Validates input string based on Minima rules and optional expected type."""
         original_input_str = input_str
-        if input_str.startswith('-'):
-            input_str = '~' + input_str[1:]
+        # No need to convert - to ~ as we're now using - for negative numbers
+        
         is_potentially_numeric = False
-        cleaned_num_str = input_str.replace('~', '', 1)
+        cleaned_num_str = input_str.replace('-', '', 1) if input_str.startswith('-') else input_str
         try:
             float(cleaned_num_str)
             is_potentially_numeric = True
         except ValueError:
             is_potentially_numeric = False
+        
         if expected_type:
             try:
                 if expected_type == 'integer':
@@ -340,12 +341,12 @@ class TACInterpreter:
                         raise ValueError("Invalid format for integer input.")
                     if not cleaned_num_str.isdigit():
                         raise ValueError("Invalid characters for integer input.")
-                    numeric_value = -int(cleaned_num_str) if input_str.startswith('~') else int(cleaned_num_str)
+                    numeric_value = -int(cleaned_num_str) if input_str.startswith('-') else int(cleaned_num_str)
                     return self.validate_number(numeric_value)
                 elif expected_type == 'point':
                     if not is_potentially_numeric:
                         raise ValueError("Invalid format for point input.")
-                    numeric_value = -float(cleaned_num_str) if input_str.startswith('~') else float(cleaned_num_str)
+                    numeric_value = -float(cleaned_num_str) if input_str.startswith('-') else float(cleaned_num_str)
                     return self.validate_number(numeric_value)
                 elif expected_type == 'state':
                     upper_val = input_str.upper()
@@ -363,10 +364,10 @@ class TACInterpreter:
             if is_potentially_numeric:
                 try:
                     if '.' in cleaned_num_str or 'e' in cleaned_num_str.lower():
-                        numeric_value = -float(cleaned_num_str) if input_str.startswith('~') else float(cleaned_num_str)
+                        numeric_value = -float(cleaned_num_str) if input_str.startswith('-') else float(cleaned_num_str)
                         return self.validate_number(numeric_value)
                     else:
-                        numeric_value = -int(cleaned_num_str) if input_str.startswith('~') else int(cleaned_num_str)
+                        numeric_value = -int(cleaned_num_str) if input_str.startswith('-') else int(cleaned_num_str)
                         return self.validate_number(numeric_value)
                 except ValueError as e:
                     raise ValueError(f"Numeric input '{original_input_str}' validation failed: {str(e)}")
@@ -924,7 +925,7 @@ class TACInterpreter:
                     if isinstance(val, bool):
                         casted_value = 1 if val else 0
                     elif isinstance(val, str):
-                        if val.startswith('~'):
+                        if val.startswith('-'):
                             casted_value = int(float(val[1:])) * -1
                         else:
                             casted_value = int(float(val))
@@ -940,7 +941,7 @@ class TACInterpreter:
                     if isinstance(val, bool):
                         casted_value = 1.0 if val else 0.0
                     elif isinstance(val, str):
-                        if val.startswith('~'):
+                        if val.startswith('-'):
                             casted_value = float(val[1:]) * -1.0
                         else:
                             casted_value = float(val)
@@ -1032,7 +1033,7 @@ class TACInterpreter:
                 try:
                     if isinstance(index, float) and index.is_integer():
                         index_int = int(index)
-                    elif isinstance(index, str) and index.startswith('~'):
+                    elif isinstance(index, str) and index.startswith('-'):
                         index_int = -int(index[1:])
                     else:
                         index_int = int(index)
@@ -1074,7 +1075,7 @@ class TACInterpreter:
                 try:
                     if isinstance(index, float) and index.is_integer():
                         index_int = int(index)
-                    elif isinstance(index, str) and index.startswith('~'):
+                    elif isinstance(index, str) and index.startswith('-'):
                         index_int = -int(index[1:])
                     else:
                         index_int = int(index)

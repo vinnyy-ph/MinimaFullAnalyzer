@@ -240,7 +240,7 @@ class TACGenerator(Visitor):
                 prompt_value = prompt_expr[1]
             elif isinstance(prompt_expr, str):
                 if prompt_expr.startswith('"') and prompt_expr.endswith('"'):
-                    prompt_value = prompt_expr[1:-1]
+                    prompt_value = prompt_expr[1:-1]  
                 else:
                     prompt_value = prompt_expr
             else:

@@ -342,10 +342,10 @@ class MinimaBultins:
             for item in collection:
                 if isinstance(item, (int, float)) and item < 0:
                     if isinstance(item, int):
-                        string_items.append(f"~{abs(item)}")
+                        string_items.append(f"-{abs(item)}")
                     else:
                         formatted = f"{abs(item):.9f}".rstrip('0').rstrip('.')
-                        string_items.append(f"~{formatted}")
+                        string_items.append(f"-{formatted}")
                 elif isinstance(item, bool):
                     string_items.append("YES" if item else "NO")
                 else:
