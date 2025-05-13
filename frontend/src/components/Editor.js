@@ -24,6 +24,10 @@ const CodeEditor = ({ code, setCode }) => {
     editorRef.current = editor;
     monacoRef.current = monacoInstance;
     
+    // Make editor globally available for error navigation
+    window.editor = editor;
+    window.monaco = monacoInstance;
+    
     monacoInstance.languages.register({ id: MINIMA });
     monacoInstance.languages.setMonarchTokensProvider(MINIMA, tokenizer);
     monacoInstance.languages.setLanguageConfiguration(MINIMA, languageConfiguration);
@@ -38,6 +42,15 @@ const CodeEditor = ({ code, setCode }) => {
     // Once mounted, load the built-in functions
     loadBuiltinFunctions(monacoInstance);
   };
+
+  // Clean up global references when component unmounts
+  useEffect(() => {
+    return () => {
+      // Cleanup global references when component unmounts
+      window.editor = undefined;
+      window.monaco = undefined;
+    };
+  }, []);
 
   // Separate function to load built-ins and update the editor
   const loadBuiltinFunctions = async (monacoInstance) => {

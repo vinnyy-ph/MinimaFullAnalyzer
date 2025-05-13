@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useContext } from 'react';
 import { 
   Alert, 
   AlertTitle, 
@@ -10,17 +10,27 @@ import {
   Chip,
   Tabs,
   Tab,
-  CircularProgress
+  CircularProgress,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import CodeIcon from '@mui/icons-material/Code';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+
+// Create a context for editor reference if it doesn't exist already
+// You may need to create this elsewhere in your app
+// import { EditorContext } from '../context/EditorContext';
 
 const Errors = ({ errors, terminalOutput = '', debugMode }) => {
   const theme = useTheme();
   const boxRef = useRef(null);
   const [tabIndex, setTabIndex] = useState(0);
+  // Uncomment if you have an editor context
+  // const { editorRef } = useContext(EditorContext);
 
   useEffect(() => {
     if (boxRef.current) {
@@ -180,15 +190,130 @@ const Errors = ({ errors, terminalOutput = '', debugMode }) => {
     );
   };
 
+  // Function to jump to error location in editor
+  const jumpToErrorLocation = (line, column) => {
+    // Check if we have access to the editor
+    if (window.monaco && window.editor) {
+      try {
+        console.log(`Jumping to line ${line}, column ${column}`);
+        
+        // Convert to numbers to ensure proper handling
+        const lineNumber = parseInt(line, 10);
+        const columnNumber = parseInt(column, 10);
+        
+        // Monaco uses 1-based line numbers and 1-based column numbers
+        window.editor.revealPositionInCenter({
+          lineNumber: lineNumber,
+          column: columnNumber
+        });
+        
+        // Set selection at the error position
+        window.editor.setSelection({
+          startLineNumber: lineNumber,
+          startColumn: columnNumber,
+          endLineNumber: lineNumber,
+          endColumn: columnNumber + 1
+        });
+        
+        window.editor.focus();
+      } catch (e) {
+        console.error('Error jumping to position:', e);
+      }
+    } else {
+      console.warn('Editor not available. Cannot jump to position.');
+    }
+  };
+
+  // Check for line and column information in error messages
+  const extractLineColumnInfo = (errorMessage) => {
+    if (!errorMessage) return { hasLocation: false };
+    
+    // Multiple regex patterns to match different error message formats
+    // 1. "at line X, column Y" format
+    const atLineColPattern = /(?:at\s+)?line\s+(\d+),\s+column\s+(\d+)/i;
+    
+    // 2. "at line X" format (for errors that only mention line)
+    const lineOnlyPattern = /(?:at\s+)?line\s+(\d+)(?!\s*,\s*column)/i;
+    
+    // 3. "Runtime Error at line X, column Y" format
+    const runtimeErrorPattern = /Runtime\s+Error(?:\s+at\s+line\s+|\s*\(?line\s*|\s+\(?line\s+)(\d+)(?:,\s*(?:col(?:umn)?\s*)?(\d+))?/i;
+    
+    let match;
+    
+    // Try each pattern in order
+    if (match = errorMessage.match(atLineColPattern)) {
+      return {
+        line: parseInt(match[1], 10),
+        column: parseInt(match[2], 10),
+        hasLocation: true
+      };
+    }
+    
+    if (match = errorMessage.match(runtimeErrorPattern)) {
+      return {
+        line: parseInt(match[1], 10),
+        column: match[2] ? parseInt(match[2], 10) : 1, // Default to column 1 if not specified
+        hasLocation: true
+      };
+    }
+    
+    if (match = errorMessage.match(lineOnlyPattern)) {
+      return {
+        line: parseInt(match[1], 10),
+        column: 1, // Default to column 1 when only line is mentioned
+        hasLocation: true
+      };
+    }
+    
+    return { hasLocation: false };
+  };
+
+  // Format error message to highlight line/column information and make it clickable
+  const formatErrorMessage = (errorMessage) => {
+    if (!errorMessage) return "Error";
+    
+    const { hasLocation, line, column } = extractLineColumnInfo(errorMessage);
+    
+    if (hasLocation) {
+      // Create a unique ID for this error location element
+      const locationId = `err-loc-${line}-${column}-${Math.random().toString(36).substring(2, 9)}`;
+      
+      // Replace the line/column info with highlighted version that has a data attribute
+      const highlighted = errorMessage.replace(
+        /(at\s+)?line\s+(\d+),\s+column\s+(\d+)/i,
+        `<span class="error-location" id="${locationId}" data-line="${line}" data-column="${column}">at line ${line}, column ${column}</span>`
+      );
+      
+      // Schedule the addition of click handler after the component renders
+      setTimeout(() => {
+        const elem = document.getElementById(locationId);
+        if (elem) {
+          elem.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            jumpToErrorLocation(line, column);
+          });
+          
+          // Add title for better UX
+          elem.title = "Click to jump to this location in the editor";
+        }
+      }, 0);
+      
+      return highlighted;
+    }
+    
+    return errorMessage;
+  };
+
   // Helper to format each individual error
   const renderErrorItem = (error, index) => {
-    let formattedMessage =
-      error.message && error.message !== 'Error' ? error.message : 'Error';
-
+    let formattedMessage = 
+      error.message && error.message !== 'Error' ? formatErrorMessage(error.message) : 'Error';
+    
     return (
-      <Box 
+      <Box
         key={`${error.type}-${index}`} 
-        sx={{ 
+        sx={{
           mb: 1.5,
           pb: 1.5,
           borderBottom: index < errors.length - 1 ? `1px solid ${theme.palette.divider}` : 'none'
@@ -216,31 +341,35 @@ const Errors = ({ errors, terminalOutput = '', debugMode }) => {
               sx={{
                 fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
                 fontWeight: 'medium',
-                mb: 0.5
+                mb: 0.5,
+                '& .error-location': {  // Add styling for error location highlights
+                  fontWeight: 'bold',
+                  color: theme.palette.error.main,
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                  padding: '2px 4px',
+                  borderRadius: '3px',
+                  backgroundColor: theme.palette.mode === 'dark' 
+                    ? 'rgba(244, 67, 54, 0.15)' 
+                    : 'rgba(244, 67, 54, 0.08)',
+                  transition: 'all 0.2s',
+                  '&:hover': {
+                    backgroundColor: theme.palette.mode === 'dark' 
+                      ? 'rgba(244, 67, 54, 0.25)' 
+                      : 'rgba(244, 67, 54, 0.15)',
+                    textDecoration: 'underline'
+                  }
+                }
               }}
-            >
-              {formattedMessage}
-              {error.line && error.column && (
-                <Box 
-                  component="span" 
-                  sx={{ 
-                    ml: 1, 
-                    fontWeight: 'normal',
-                    color: theme.palette.text.secondary,
-                    fontSize: '0.8rem'
-                  }}
-                >
-                  (Line {error.line}, Col {error.column})
-                </Box>
-              )}
-            </Typography>
+              dangerouslySetInnerHTML={{ __html: formattedMessage }}
+            />
 
-            {/* Unexpected tokens / expected tokens */}
+            {/* Keep the rest of the original code */}
             {error.unexpected && (
               <Box sx={{ pl: 1, fontSize: '0.85rem' }}>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
+                <Typography
+                  variant="body2"
+                  sx={{
                     color: theme.palette.text.secondary,
                     display: 'flex',
                     alignItems: 'center',
@@ -468,7 +597,9 @@ const Errors = ({ errors, terminalOutput = '', debugMode }) => {
                     />
                   )}
                 </Box>
-                {errors.map((error, index) => renderErrorItem(error, index))}
+                {errors.map((error, index) => {
+                  return renderErrorItem(error, index);
+                })}
               </Box>
             )}
           </>

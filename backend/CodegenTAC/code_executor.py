@@ -104,7 +104,7 @@ def execute_code(code, execution_id=None, user_input=None, debug_mode=False):
             results['success'] = True
             results['output'] = output_segment
             results['tac'] = interpreter.instructions
-            results['formattedTAC'] = format_tac_instructions(interpreter.instructions)
+            results['formattedTAC'] = format_tac_instructions(interpreter.instructions, interpreter.source_positions)
             results['terminalOutput'] = f"Execution resumed with input: {user_input}\n"
             results['terminalOutput'] += f"Steps executed: {interpreter.steps_executed}\n"
         except Exception as e:
@@ -148,10 +148,13 @@ def execute_code(code, execution_id=None, user_input=None, debug_mode=False):
             return results
         code_generator = TACGenerator(debug_mode=debug_mode)
         tac_instructions = code_generator.generate(parse_tree)
+        source_positions = getattr(code_generator, 'source_positions', None)
+        
         results['tac'] = tac_instructions
-        results['formattedTAC'] = format_tac_instructions(tac_instructions)
+        results['formattedTAC'] = format_tac_instructions(tac_instructions, source_positions)
         results['terminalOutput'] += f"Generated {len(tac_instructions)} TAC instructions.\n"
-        interpreter = TACInterpreter().load(tac_instructions)
+        
+        interpreter = TACInterpreter().load(tac_instructions, source_positions)
         interpreter.debug_mode = debug_mode
         max_steps = float('inf')
         interpreter.max_execution_steps = max_steps
@@ -190,8 +193,17 @@ def execute_code(code, execution_id=None, user_input=None, debug_mode=False):
     if 'output' in results and results['output']:
         results['output'] = format_minima_output(results['output'])    
     return results
-def format_tac_instructions(tac_instructions):
-    """Format TAC instructions for display."""
+def format_tac_instructions(tac_instructions, source_positions=None):
+    """
+    Format TAC instructions for display.
+    
+    Args:
+        tac_instructions: List of TAC instructions
+        source_positions: Optional list of source positions (line, column) for each instruction
+    
+    Returns:
+        Formatted string representation of TAC instructions
+    """
     formatted_lines = []
     for i, (op, arg1, arg2, result) in enumerate(tac_instructions):
         parts = []
@@ -203,6 +215,13 @@ def format_tac_instructions(tac_instructions):
             parts.append(str(arg2))
         if result is not None:
             parts.append(str(result))
+            
         instr_str = f"{i}: {op} {', '.join(parts)}"
+        
+        # Add source position if available
+        if source_positions and i < len(source_positions) and source_positions[i]:
+            line, col = source_positions[i]
+            instr_str += f" (line {line}, col {col})"
+            
         formatted_lines.append(instr_str)
     return '\n'.join(formatted_lines)

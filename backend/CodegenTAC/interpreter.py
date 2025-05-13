@@ -13,6 +13,7 @@ class TACInterpreter:
         self.param_stack = []
         self.output_buffer = StringIO()
         self.instructions = []
+        self.source_positions = []  # New: Store source positions for each instruction
         self.labels = {}
         self.function_bodies = {}
         self.waiting_for_input = False
@@ -178,14 +179,32 @@ class TACInterpreter:
         self.output_buffer = StringIO()
         self.function_bodies = {}
         self.labels = {}
+        self.source_positions = []  # New: Reset source positions
         self.waiting_for_input = False
         self.input_prompt = ""
         self.input_result_var = None
         self.steps_executed = 0
 
-    def load(self, instructions):
+    def load(self, instructions, source_positions=None):
+        """
+        Load TAC instructions and their source positions.
+        
+        Args:
+            instructions: List of TAC instructions
+            source_positions: Optional list of source positions (line, column) for each instruction
+        
+        Returns:
+            self (for method chaining)
+        """
         self.reset()
         self.instructions = instructions
+        
+        # Store source positions if provided, otherwise initialize with None values
+        if source_positions:
+            self.source_positions = source_positions
+        else:
+            self.source_positions = [None] * len(instructions)
+            
         current_function = None
         for i, (op, arg1, arg2, result) in enumerate(instructions):
             if op == 'FUNCTION':
@@ -193,7 +212,11 @@ class TACInterpreter:
                 self.functions[current_function] = result
                 self.function_params[current_function] = arg2 or []
                 if self.debug_mode:
-                    print(f"Registered function '{current_function}' starting at label '{result}' with params {arg2}")
+                    source_info = ""
+                    if self.source_positions[i]:
+                        line, col = self.source_positions[i]
+                        source_info = f" (at line {line}, col {col})"
+                    print(f"Registered function '{current_function}' starting at label '{result}' with params {arg2}{source_info}")
             elif op == 'LABEL':
                 self.labels[result] = i
                 if self.debug_mode:
@@ -253,7 +276,13 @@ class TACInterpreter:
                     self.ip += 1
             except Exception as e:
                 error_line = prev_ip
-                error_message = f"\nRuntime Error at instruction {error_line} ({op} {arg1} {arg2} {result}): {str(e)}\n"
+                # Get source position for error reporting
+                source_pos = self.source_positions[error_line] if error_line < len(self.source_positions) else None
+                source_info = ""
+                if source_pos:
+                    source_info = f" at line {source_pos[0]}, column {source_pos[1]}"
+                
+                error_message = f"\nRuntime Error{source_info} (instruction {error_line}: {op} {arg1} {arg2} {result}): {str(e)}\n"
                 print(error_message)
                 print(traceback.format_exc())
                 self.output_buffer.write(error_message)
@@ -310,7 +339,13 @@ class TACInterpreter:
                     self.ip += 1
             except Exception as e:
                 error_line = prev_ip
-                error_message = f"\nRuntime Error at instruction {error_line} ({op} {arg1} {arg2} {result}): {str(e)}\n"
+                # Get source position for error reporting
+                source_pos = self.source_positions[error_line] if error_line < len(self.source_positions) else None
+                source_info = ""
+                if source_pos:
+                    source_info = f" at line {source_pos[0]}, column {source_pos[1]}"
+                
+                error_message = f"\nRuntime Error{source_info} (instruction {error_line}: {op} {arg1} {arg2} {result}): {str(e)}\n"
                 print(error_message)
                 print(traceback.format_exc())
                 self.output_buffer.write(error_message)

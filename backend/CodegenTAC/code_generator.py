@@ -4,6 +4,7 @@ class TACGenerator(Visitor):
     def __init__(self, debug_mode=False):
         super().__init__()
         self.instructions = []
+        self.source_positions = []  # Store source position for each instruction
         self.temp_counter = 0
         self.label_counter = 0
         self.current_scope = "global"
@@ -34,10 +35,24 @@ class TACGenerator(Visitor):
         """Generate a new label for control flow."""
         self.label_counter += 1
         return f"L{self.label_counter}"
-    def emit(self, op, arg1=None, arg2=None, result=None):
-        """Emit a TAC instruction."""
+    def emit(self, op, arg1=None, arg2=None, result=None, line=None, column=None):
+        """
+        Emit a TAC instruction with source position information.
+        
+        Args:
+            op: Operation code
+            arg1, arg2, result: Instruction arguments and result
+            line, column: Source code position (if available)
+        """
         instruction = (op, arg1, arg2, result)
         self.instructions.append(instruction)
+        
+        # Store source position
+        source_pos = None
+        if line is not None:
+            source_pos = (line, column if column is not None else 0)
+        self.source_positions.append(source_pos)
+        
         return instruction
     def debug_print_tree(self, node, depth=0):
         """Debug function to print the AST structure"""
@@ -63,6 +78,7 @@ class TACGenerator(Visitor):
         
         # Reset internal state
         self.instructions = []
+        self.source_positions = []
         self.temp_counter = 0
         self.label_counter = 0
         self.variable_types = {}
@@ -75,7 +91,9 @@ class TACGenerator(Visitor):
         if self.debug_mode:
             print("\nGenerated TAC instructions:")
             for i, (op, arg1, arg2, result) in enumerate(self.instructions):
-                print(f"{i}: {op} {arg1}, {arg2}, {result}")
+                src_pos = self.source_positions[i]
+                src_info = f"(line {src_pos[0]}, col {src_pos[1]})" if src_pos else "(no source info)"
+                print(f"{i}: {op} {arg1}, {arg2}, {result} {src_info}")
         
         return self.instructions
     def get_type(self, node_or_value):
@@ -155,6 +173,8 @@ class TACGenerator(Visitor):
     def visit_varlist_declaration(self, node):
         """Handle variable declarations."""
         var_name = node.children[1].value
+        source_pos = self.get_source_position(node)
+        
         if len(node.children) >= 3 and node.children[2]:
             if hasattr(node.children[2], 'data') and node.children[2].data == 'var_init':
                 if len(node.children[2].children) > 0:
@@ -163,16 +183,20 @@ class TACGenerator(Visitor):
                     if self._is_get_function_call(init_expr_node, get_prompt):
                         prompt = get_prompt if get_prompt else "Enter a value:"
                         temp = self.get_temp()
-                        self.emit('INPUT', prompt, None, temp)
-                        self.emit('ASSIGN', temp, None, var_name)
+                        self.emit('INPUT', prompt, None, temp, 
+                                 *(source_pos if source_pos else (None, None)))
+                        self.emit('ASSIGN', temp, None, var_name,
+                                 *(source_pos if source_pos else (None, None)))
                         self.variable_types[var_name] = 'text'
                     else:
                         init_expr = self.visit(node.children[2].children[1])
                         if isinstance(init_expr, tuple) and init_expr[0] in ('id','integer','float','bool','string','text'):
-                            self.emit('ASSIGN', init_expr[1], None, var_name)
+                            self.emit('ASSIGN', init_expr[1], None, var_name,
+                                     *(source_pos if source_pos else (None, None)))
                             self.variable_types[var_name] = init_expr[0]
                         else:
-                            self.emit('ASSIGN', init_expr, None, var_name)
+                            self.emit('ASSIGN', init_expr, None, var_name,
+                                     *(source_pos if source_pos else (None, None)))
                             if isinstance(init_expr, str) and init_expr.startswith('t'):
                                 pass
             if len(node.children) > 3 and node.children[3]:
@@ -450,6 +474,8 @@ class TACGenerator(Visitor):
         """
         children = node.children
         left = self.visit(children[0])  # Visit left operand first (should be multiplication expression)
+        source_pos = self.get_source_position(node)
+        
         i = 1
         while i < len(children):
             op = children[i].value  
@@ -461,22 +487,27 @@ class TACGenerator(Visitor):
             right_type = right[0] if isinstance(right, tuple) else self.get_type(right)
             if op == "+":
                 if left_type == "list" or right_type == "list":
-                    self.emit('ADD', left_operand, right_operand, temp)
+                    self.emit('ADD', left_operand, right_operand, temp, 
+                             *(source_pos if source_pos else (None, None)))
                     self.variable_types[temp] = "list"
                 elif left_type == "text" or right_type == "text":
-                    self.emit('CONCAT', left_operand, right_operand, temp)
+                    self.emit('CONCAT', left_operand, right_operand, temp,
+                             *(source_pos if source_pos else (None, None)))
                     self.variable_types[temp] = "text"
                 else:
-                    self.emit('ADD', left_operand, right_operand, temp)
+                    self.emit('ADD', left_operand, right_operand, temp,
+                             *(source_pos if source_pos else (None, None)))
                     if left_type == "point" or right_type == "point" or left_type == "float" or right_type == "float":
                         self.variable_types[temp] = "point"
                     else:
                         self.variable_types[temp] = "integer"
             else:  
                 if left_type == "text" or right_type == "text" or left_type == "list" or right_type == "list":
-                    self.emit('ERROR', "Cannot subtract from text or list", None, temp)
+                    self.emit('ERROR', "Cannot subtract from text or list", None, temp,
+                             *(source_pos if source_pos else (None, None)))
                 else:
-                    self.emit('SUB', left_operand, right_operand, temp)
+                    self.emit('SUB', left_operand, right_operand, temp,
+                             *(source_pos if source_pos else (None, None)))
                     if left_type == "point" or right_type == "point" or left_type == "float" or right_type == "float":
                         self.variable_types[temp] = "point"
                     else:
@@ -492,6 +523,8 @@ class TACGenerator(Visitor):
         children = node.children
         # Visit the leftmost operand first (which could be a primary expression)
         left = self.visit(children[0])
+        source_pos = self.get_source_position(node)
+        
         i = 1
         while i < len(children):
             op = children[i].value
@@ -503,15 +536,19 @@ class TACGenerator(Visitor):
             left_type = left[0] if isinstance(left, tuple) else self.get_type(left)
             right_type = right[0] if isinstance(right, tuple) else self.get_type(right)
             if left_type == "text" or right_type == "text":
-                self.emit('ERROR', f"Cannot use {op} with text", None, temp)
+                self.emit('ERROR', f"Cannot use {op} with text", None, temp,
+                         *(source_pos if source_pos else (None, None)))
             else:
                 if op == "*":
-                    self.emit('MUL', left_operand, right_operand, temp)
+                    self.emit('MUL', left_operand, right_operand, temp,
+                             *(source_pos if source_pos else (None, None)))
                 elif op == "/":
-                    self.emit('DIV', left_operand, right_operand, temp)
+                    self.emit('DIV', left_operand, right_operand, temp,
+                             *(source_pos if source_pos else (None, None)))
                     self.variable_types[temp] = "point"
                 else:  
-                    self.emit('MOD', left_operand, right_operand, temp)
+                    self.emit('MOD', left_operand, right_operand, temp,
+                             *(source_pos if source_pos else (None, None)))
                 if op != "/" and (left_type == "point" or right_type == "point" or 
                                 left_type == "float" or right_type == "float"):
                     self.variable_types[temp] = "point"
@@ -727,15 +764,36 @@ class TACGenerator(Visitor):
         if isinstance(index_expr, tuple) and len(index_expr) >= 2 and index_expr[0] == 'id':
             index_expr = index_expr[1]  
         temp = self.get_temp()
+        source_pos = self.get_source_position(node)
         if is_list_access:
-            self.emit('LIST_ACCESS', var_name, index_expr, temp)
+            self.emit('LIST_ACCESS', var_name, index_expr, temp,
+                     *(source_pos if source_pos else (None, None)))
         else:
-            self.emit('GROUP_ACCESS', var_name, index_expr, temp)
+            self.emit('GROUP_ACCESS', var_name, index_expr, temp,
+                     *(source_pos if source_pos else (None, None)))
+        return temp
+    def visit_list_access(self, node, var_name):
+        """Handle list indexing (list[expr])."""
+        source_pos = self.get_source_position(node)
+        index_expr = self.visit(node.children[1])
+        temp = self.get_temp()
+        if isinstance(index_expr, tuple) and index_expr[0] == 'id':
+            temp_idx = self.get_temp()
+            self.emit('ASSIGN', index_expr[1], None, temp_idx, 
+                     *(source_pos if source_pos else (None, None)))
+            self.emit('LIST_ACCESS', var_name, temp_idx, temp,
+                     *(source_pos if source_pos else (None, None)))
+        else:
+            index_val = index_expr[1] if isinstance(index_expr, tuple) and len(index_expr) >= 2 else index_expr
+            self.emit('LIST_ACCESS', var_name, index_val, temp,
+                     *(source_pos if source_pos else (None, None)))
         return temp
     def visit_var_assign(self, node):
         """Handle variable assignments, including list element assignments."""
         children = node.children
         var_name = children[0].value
+        source_pos = self.get_source_position(node)
+        
         has_accessor = False
         accessor_node = None
         accessor_expr = None
@@ -747,7 +805,8 @@ class TACGenerator(Visitor):
                 index_expr = self.visit(accessor_node.children[1])
                 if isinstance(index_expr, tuple) and index_expr[0] == 'id':
                     temp_idx = self.get_temp()
-                    self.emit('ASSIGN', index_expr[1], None, temp_idx)
+                    self.emit('ASSIGN', index_expr[1], None, temp_idx,
+                             *(source_pos if source_pos else (None, None)))
                     accessor_expr = temp_idx
                 else:
                     accessor_expr = index_expr
@@ -771,77 +830,99 @@ class TACGenerator(Visitor):
             if op == '=':
                 if isinstance(expr_val, tuple):
                     if is_list_access:
-                        self.emit('LIST_SET', var_name, accessor_expr, expr_val[1])
+                        self.emit('LIST_SET', var_name, accessor_expr, expr_val[1],
+                                 *(source_pos if source_pos else (None, None)))
                     else:
-                        self.emit('GROUP_SET', var_name, accessor_expr, expr_val[1])
+                        self.emit('GROUP_SET', var_name, accessor_expr, expr_val[1],
+                                 *(source_pos if source_pos else (None, None)))
                 else:
                     if is_list_access:
-                        self.emit('LIST_SET', var_name, accessor_expr, expr_val)
+                        self.emit('LIST_SET', var_name, accessor_expr, expr_val,
+                                 *(source_pos if source_pos else (None, None)))
                     else:
-                        self.emit('GROUP_SET', var_name, accessor_expr, expr_val)
+                        self.emit('GROUP_SET', var_name, accessor_expr, expr_val,
+                                 *(source_pos if source_pos else (None, None)))
             else:
                 temp = self.get_temp()
                 if is_list_access:
-                    self.emit('LIST_ACCESS', var_name, accessor_expr, temp)
+                    self.emit('LIST_ACCESS', var_name, accessor_expr, temp,
+                             *(source_pos if source_pos else (None, None)))
                 else:
-                    self.emit('GROUP_ACCESS', var_name, accessor_expr, temp)
+                    self.emit('GROUP_ACCESS', var_name, accessor_expr, temp,
+                             *(source_pos if source_pos else (None, None)))
                 result_temp = self.get_temp()
                 rhs = expr_val[1] if isinstance(expr_val, tuple) else expr_val
                 if op == '+=':
-                    self.emit('ADD', temp, rhs, result_temp)
+                    self.emit('ADD', temp, rhs, result_temp,
+                             *(source_pos if source_pos else (None, None)))
                 elif op == '-=':
-                    self.emit('SUB', temp, rhs, result_temp)
+                    self.emit('SUB', temp, rhs, result_temp,
+                             *(source_pos if source_pos else (None, None)))
                 elif op == '*=':
-                    self.emit('MUL', temp, rhs, result_temp)
+                    self.emit('MUL', temp, rhs, result_temp,
+                             *(source_pos if source_pos else (None, None)))
                 elif op == '/=':
-                    self.emit('DIV', temp, rhs, result_temp)
+                    self.emit('DIV', temp, rhs, result_temp,
+                             *(source_pos if source_pos else (None, None)))
                 if is_list_access:
-                    self.emit('LIST_SET', var_name, accessor_expr, result_temp)
+                    self.emit('LIST_SET', var_name, accessor_expr, result_temp,
+                             *(source_pos if source_pos else (None, None)))
                 else:
-                    self.emit('GROUP_SET', var_name, accessor_expr, result_temp)
+                    self.emit('GROUP_SET', var_name, accessor_expr, result_temp,
+                             *(source_pos if source_pos else (None, None)))
         else:
             if op == '=':
                 if isinstance(expr_val, tuple):
-                    self.emit('ASSIGN', expr_val[1], None, var_name)
+                    self.emit('ASSIGN', expr_val[1], None, var_name,
+                             *(source_pos if source_pos else (None, None)))
                 else:
-                    self.emit('ASSIGN', expr_val, None, var_name)
+                    self.emit('ASSIGN', expr_val, None, var_name,
+                             *(source_pos if source_pos else (None, None)))
             else:
                 temp = self.get_temp()
-                self.emit('ASSIGN', var_name, None, temp)
+                self.emit('ASSIGN', var_name, None, temp,
+                         *(source_pos if source_pos else (None, None)))
                 rhs = expr_val[1] if isinstance(expr_val, tuple) else expr_val
                 result_temp = self.get_temp()
                 var_type = self.get_type(var_name)
                 expr_type = expr_val[0] if isinstance(expr_val, tuple) else self.get_type(expr_val)
                 if op == '+=':
                     if var_type == "list" or expr_type == "list":
-                        self.emit('LIST_EXTEND', temp, rhs, var_name)
+                        self.emit('LIST_EXTEND', temp, rhs, var_name,
+                                 *(source_pos if source_pos else (None, None)))
                         return None
                     elif var_type == "text" or expr_type == "text":
-                        self.emit('CONCAT', temp, rhs, result_temp)
+                        self.emit('CONCAT', temp, rhs, result_temp,
+                                 *(source_pos if source_pos else (None, None)))
                         self.variable_types[result_temp] = "text"
                     else:
-                        self.emit('ADD', temp, rhs, result_temp)
+                        self.emit('ADD', temp, rhs, result_temp,
+                                 *(source_pos if source_pos else (None, None)))
                         if var_type == "point" or expr_type == "point" or var_type == "float" or expr_type == "float":
                             self.variable_types[result_temp] = "point"
                         else:
                             self.variable_types[result_temp] = "integer"
                 elif op == '-=':
-                    self.emit('SUB', temp, rhs, result_temp)
+                    self.emit('SUB', temp, rhs, result_temp,
+                             *(source_pos if source_pos else (None, None)))
                     if var_type == "point" or expr_type == "point" or var_type == "float" or expr_type == "float":
                         self.variable_types[result_temp] = "point"
                     else:
                         self.variable_types[result_temp] = "integer"
                 elif op == '*=':
-                    self.emit('MUL', temp, rhs, result_temp)
+                    self.emit('MUL', temp, rhs, result_temp,
+                             *(source_pos if source_pos else (None, None)))
                     if var_type == "point" or expr_type == "point" or var_type == "float" or expr_type == "float":
                         self.variable_types[result_temp] = "point"
                     else:
                         self.variable_types[result_temp] = "integer"
                 elif op == '/=':
-                    self.emit('DIV', temp, rhs, result_temp)
+                    self.emit('DIV', temp, rhs, result_temp,
+                             *(source_pos if source_pos else (None, None)))
                     self.variable_types[result_temp] = "point"
                 if not (op == '+=' and (var_type == "list" or expr_type == "list")):
-                    self.emit('ASSIGN', result_temp, None, var_name)
+                    self.emit('ASSIGN', result_temp, None, var_name,
+                             *(source_pos if source_pos else (None, None)))
                     if result_temp in self.variable_types:
                         self.variable_types[var_name] = self.variable_types[result_temp]
         return None
@@ -850,12 +931,14 @@ class TACGenerator(Visitor):
         Generate TAC for show statements, properly handling list indexing in arguments.
         Structure: SHOW LPAREN expression RPAREN
         """
+        source_pos = self.get_source_position(node)
         expr = self.visit(node.children[2])
         if isinstance(expr, str) and expr.startswith('t'):
             val = expr
         else:
             val = expr[1] if isinstance(expr, tuple) and len(expr) >= 2 else expr
-        self.emit('PRINT', val, None, None)
+        self.emit('PRINT', val, None, None, 
+                 *(source_pos if source_pos else (None, None)))
         return None
     def visit_func_definition(self, node):
         func_name = node.children[1].value
@@ -1388,4 +1471,23 @@ class TACGenerator(Visitor):
         
         self.visit_group_members(node.children[1], group_temp)
         
+        return None
+
+    def get_source_position(self, node):
+        """
+        Extract line and column information from an AST node.
+        
+        Returns:
+            Tuple (line, column) or None if information is not available
+        """
+        line = getattr(node, 'line', None)
+        column = getattr(node, 'column', None)
+        
+        # Try to get meta info if available
+        if hasattr(node, 'meta'):
+            line = getattr(node.meta, 'line', line)
+            column = getattr(node.meta, 'column', column)
+            
+        if line is not None:
+            return (line, column if column is not None else 0)
         return None
