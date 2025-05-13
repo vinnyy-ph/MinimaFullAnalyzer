@@ -744,14 +744,13 @@ class TACGenerator(Visitor):
             accessor_node = children[1]
             if hasattr(accessor_node, 'children') and len(accessor_node.children) > 1:
                 is_list_access = accessor_node.children[0].type == "LSQB"
-                if is_list_access:
-                    index_expr = self.visit(accessor_node.children[1])
-                    if isinstance(index_expr, tuple) and index_expr[0] == 'id':
-                        temp_idx = self.get_temp()
-                        self.emit('ASSIGN', index_expr[1], None, temp_idx)
-                        accessor_expr = temp_idx
-                    else:
-                        accessor_expr = index_expr
+                index_expr = self.visit(accessor_node.children[1])
+                if isinstance(index_expr, tuple) and index_expr[0] == 'id':
+                    temp_idx = self.get_temp()
+                    self.emit('ASSIGN', index_expr[1], None, temp_idx)
+                    accessor_expr = temp_idx
+                else:
+                    accessor_expr = index_expr
         if has_accessor:
             assign_op_idx = 2
             expr_idx = 3
@@ -768,14 +767,24 @@ class TACGenerator(Visitor):
         if isinstance(expr_val, tuple) and len(expr_val) >= 2:
             self.variable_types[var_name] = expr_val[0]
         if has_accessor and accessor_expr is not None:
+            is_list_access = accessor_node.children[0].type == "LSQB"
             if op == '=':
                 if isinstance(expr_val, tuple):
-                    self.emit('LIST_SET', var_name, accessor_expr, expr_val[1])
+                    if is_list_access:
+                        self.emit('LIST_SET', var_name, accessor_expr, expr_val[1])
+                    else:
+                        self.emit('GROUP_SET', var_name, accessor_expr, expr_val[1])
                 else:
-                    self.emit('LIST_SET', var_name, accessor_expr, expr_val)
+                    if is_list_access:
+                        self.emit('LIST_SET', var_name, accessor_expr, expr_val)
+                    else:
+                        self.emit('GROUP_SET', var_name, accessor_expr, expr_val)
             else:
                 temp = self.get_temp()
-                self.emit('LIST_ACCESS', var_name, accessor_expr, temp)
+                if is_list_access:
+                    self.emit('LIST_ACCESS', var_name, accessor_expr, temp)
+                else:
+                    self.emit('GROUP_ACCESS', var_name, accessor_expr, temp)
                 result_temp = self.get_temp()
                 rhs = expr_val[1] if isinstance(expr_val, tuple) else expr_val
                 if op == '+=':
@@ -786,7 +795,10 @@ class TACGenerator(Visitor):
                     self.emit('MUL', temp, rhs, result_temp)
                 elif op == '/=':
                     self.emit('DIV', temp, rhs, result_temp)
-                self.emit('LIST_SET', var_name, accessor_expr, result_temp)
+                if is_list_access:
+                    self.emit('LIST_SET', var_name, accessor_expr, result_temp)
+                else:
+                    self.emit('GROUP_SET', var_name, accessor_expr, result_temp)
         else:
             if op == '=':
                 if isinstance(expr_val, tuple):
@@ -1334,4 +1346,46 @@ class TACGenerator(Visitor):
         if not node or not hasattr(node, 'children') or len(node.children) < 3:
             return None
         self.visit(node.children[2])  
+        return None
+    def visit_group_declaration(self, node):
+        """Handle group declarations."""
+        ident = node.children[1]
+        name = ident.value
+        
+        # Create a temporary for the group
+        temp = self.get_temp()
+        self.emit('GROUP_CREATE', None, None, temp)
+        
+        # Process group members
+        if len(node.children) > 3 and node.children[3]:
+            self.visit_group_members(node.children[3], temp)
+        
+        # Assign the group to the variable
+        self.emit('ASSIGN', temp, None, name)
+        self.variable_types[name] = "group"
+        
+        return None
+
+    def visit_group_members(self, node, group_temp):
+        """Handle group members."""
+        key_expr = self.visit(node.children[0])
+        value_expr = self.visit(node.children[2])
+        
+        key = key_expr[1] if isinstance(key_expr, tuple) and len(key_expr) >= 2 else key_expr
+        value = value_expr[1] if isinstance(value_expr, tuple) and len(value_expr) >= 2 else value_expr
+        
+        self.emit('GROUP_SET', group_temp, key, value)
+        
+        if len(node.children) > 3 and node.children[3]:
+            self.visit_member_tail(node.children[3], group_temp)
+        
+        return None
+
+    def visit_member_tail(self, node, group_temp):
+        """Handle additional group members."""
+        if not node or not hasattr(node, 'children') or len(node.children) < 2:
+            return None
+        
+        self.visit_group_members(node.children[1], group_temp)
+        
         return None
