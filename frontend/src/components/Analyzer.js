@@ -279,7 +279,7 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     setExecutionId(null);
     setUserInput('');
     
-    // Switch to the Program Output tab when executing
+    // match to the Program Output tab when executing
     setRightPanelTab(1);
     
     axios.post('http://localhost:5000/executeCode', { code })
@@ -666,7 +666,7 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
               flexDirection: 'column',
             }}
           >
-            {/* Tabs for switching views */}
+            {/* Tabs for matching views */}
             <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
               <Tabs 
                 value={rightPanelTab} 

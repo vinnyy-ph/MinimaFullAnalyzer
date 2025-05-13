@@ -16,7 +16,7 @@ class SemanticAnalyzer(Visitor):
         self.values = {}
         self.current_function = None
         self.loop_depth = 0
-        self.switch_depth = 0
+        self.match_depth = 0
         self.in_loop_block = False
         self.has_return = False
         self.function_returns = {}  
@@ -1368,12 +1368,12 @@ class SemanticAnalyzer(Visitor):
         self.loop_depth -= 1
         if self.loop_depth == 0:
             self.in_loop_block = False
-    def enter_switch(self):
-        """Enter a switch statement context."""
-        self.switch_depth += 1
-    def exit_switch(self):
-        """Exit a switch statement context."""
-        self.switch_depth -= 1
+    def enter_match(self):
+        """Enter a match statement context."""
+        self.match_depth += 1
+    def exit_match(self):
+        """Exit a match statement context."""
+        self.match_depth -= 1
     def check_boolean_expr(self, expr_node, context):
         """
         Check if an expression node can be evaluated as a boolean (state).
@@ -1480,14 +1480,14 @@ class SemanticAnalyzer(Visitor):
         self.visit(node.children[2])
         self.pop_scope()
         return None
-    def visit_switch_statement(self, node):
+    def visit_match_statement(self, node):
         """
-        Semantic analysis for switch_statement.
-        Syntax: SWITCH LPAREN expression RPAREN LBRACE CASE literals COLON program case_tail default RBRACE
+        Semantic analysis for match_statement.
+        Syntax: match LPAREN expression RPAREN LBRACE CASE literals COLON program case_tail default RBRACE
         """
         self.visit(node.children[2])
         self.push_scope()
-        self.enter_switch()
+        self.enter_match()
         case_values = set()
         case_value = self.get_value(node.children[6])
         if case_value and case_value[0] != "unknown":
@@ -1497,7 +1497,7 @@ class SemanticAnalyzer(Visitor):
             self.visit_case_values(node.children[9], case_values)
         if len(node.children) > 10 and node.children[10]:
             self.visit(node.children[10])
-        self.exit_switch()
+        self.exit_match()
         self.pop_scope()
         return None
     def visit_case_values(self, case_tail_node, case_values):
@@ -1742,17 +1742,17 @@ class SemanticAnalyzer(Visitor):
         self.visit(node.children[2]) 
         self.pop_scope()
         return None
-    def visit_func_switch_statement(self, node):
+    def visit_func_match_statement(self, node):
         self.visit(node.children[2]) 
         self.push_scope()
-        self.enter_switch()
+        self.enter_match()
         case_values = set()
         case_value = self.get_value(node.children[6])
         if case_value and case_value[0] != "unknown": case_values.add(str(case_value))
         self.visit(node.children[8]) 
         if len(node.children) > 9 and node.children[9]: self.visit_func_case_tail(node.children[9], case_values)
         if len(node.children) > 10 and node.children[10]: self.visit(node.children[10]) 
-        self.exit_switch()
+        self.exit_match()
         self.pop_scope()
         return None
     def visit_func_case_tail(self, node, case_values):
@@ -1797,10 +1797,10 @@ class SemanticAnalyzer(Visitor):
         self.visit(node.children[2])  
         self.pop_scope()
         return None
-    def visit_func_loop_switch_statement(self, node):
+    def visit_func_loop_match_statement(self, node):
         self.visit(node.children[2])  
         self.push_scope()
-        self.enter_switch()
+        self.enter_match()
         case_values = set()
         case_value = self.get_value(node.children[6])
         if case_value and case_value[0] != "unknown":
@@ -1810,7 +1810,7 @@ class SemanticAnalyzer(Visitor):
             self.visit_case_tail_loop(node.children[9], case_values)
         if len(node.children) > 10 and node.children[10]:
             self.visit(node.children[10])  
-        self.exit_switch()
+        self.exit_match()
         self.pop_scope()
         return None
     def visit_case_tail_loop(self, node, case_values):
@@ -1858,17 +1858,17 @@ class SemanticAnalyzer(Visitor):
         self.visit(node.children[2]) 
         self.pop_scope()
         return None
-    def visit_func_switch_statement(self, node):
+    def visit_func_match_statement(self, node):
         self.visit(node.children[2]) 
         self.push_scope()
-        self.enter_switch()
+        self.enter_match()
         case_values = set()
         case_value = self.get_value(node.children[6])
         if case_value and case_value[0] != "unknown": case_values.add(str(case_value))
         self.visit(node.children[8]) 
         if len(node.children) > 9 and node.children[9]: self.visit_func_case_tail(node.children[9], case_values)
         if len(node.children) > 10 and node.children[10]: self.visit(node.children[10]) 
-        self.exit_switch()
+        self.exit_match()
         self.pop_scope()
         return None
     def visit_func_case_tail(self, node, case_values=None):
@@ -1913,10 +1913,10 @@ class SemanticAnalyzer(Visitor):
         self.visit(node.children[2])  
         self.pop_scope()
         return None
-    def visit_func_loop_switch_statement(self, node):
+    def visit_func_loop_match_statement(self, node):
         self.visit(node.children[2])  
         self.push_scope()
-        self.enter_switch()
+        self.enter_match()
         case_values = set()
         case_value = self.get_value(node.children[6])
         if case_value and case_value[0] != "unknown":
@@ -1926,7 +1926,7 @@ class SemanticAnalyzer(Visitor):
             self.visit_case_tail_loop(node.children[9], case_values)
         if len(node.children) > 10 and node.children[10]:
             self.visit(node.children[10])  
-        self.exit_switch()
+        self.exit_match()
         self.pop_scope()
         return None
     def visit_func_loop_case_tail(self, node, case_values):

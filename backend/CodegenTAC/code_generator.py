@@ -1223,44 +1223,44 @@ class TACGenerator(Visitor):
             return None
         self.visit(node.children[2])  
         return None
-    def visit_switch_statement(self, node):
+    def visit_match_statement(self, node):
         """
-        Generate TAC for switch statements.
-        Structure: SWITCH LPAREN expression RPAREN LBRACE CASE literals COLON program case_tail default RBRACE
+        Generate TAC for match statements.
+        Structure: match LPAREN expression RPAREN LBRACE CASE literals COLON program case_tail default RBRACE
         """
         end_label = self.get_label()
-        switch_expr = self.visit(node.children[2])
-        switch_expr_val = switch_expr[1] if isinstance(switch_expr, tuple) and len(switch_expr) >= 2 else switch_expr
+        match_expr = self.visit(node.children[2])
+        match_expr_val = match_expr[1] if isinstance(match_expr, tuple) and len(match_expr) >= 2 else match_expr
         case_value = self.visit(node.children[6])
         comp_temp = self.get_temp()
-        self.emit('EQ', switch_expr_val, case_value[1] if isinstance(case_value, tuple) else case_value, comp_temp)
+        self.emit('EQ', match_expr_val, case_value[1] if isinstance(case_value, tuple) else case_value, comp_temp)
         next_case_label = self.get_label()
         self.emit('IFFALSE', comp_temp, None, next_case_label)
         self.visit(node.children[8])
         self.emit('GOTO', None, None, end_label)
         self.emit('LABEL', None, None, next_case_label)
         if len(node.children) > 9 and node.children[9]:
-            self.visit_case_tail(node.children[9], switch_expr_val, end_label)
+            self.visit_case_tail(node.children[9], match_expr_val, end_label)
         if len(node.children) > 10 and node.children[10]:
             self.visit(node.children[10])
         self.emit('LABEL', None, None, end_label)
         return None
-    def visit_case_tail(self, node, switch_expr, end_label):
+    def visit_case_tail(self, node, match_expr, end_label):
         """
-        Generate TAC for additional cases in a switch statement.
+        Generate TAC for additional cases in a match statement.
         """
         if not node or not hasattr(node, 'children') or len(node.children) < 4:
             return None
         case_value = self.visit(node.children[1])
         comp_temp = self.get_temp()
-        self.emit('EQ', switch_expr, case_value[1] if isinstance(case_value, tuple) else case_value, comp_temp)
+        self.emit('EQ', match_expr, case_value[1] if isinstance(case_value, tuple) else case_value, comp_temp)
         next_case_label = self.get_label()
         self.emit('IFFALSE', comp_temp, None, next_case_label)
         self.visit(node.children[3])
         self.emit('GOTO', None, None, end_label)
         self.emit('LABEL', None, None, next_case_label)
         if len(node.children) > 4 and node.children[4]:
-            self.visit_case_tail(node.children[4], switch_expr, end_label)
+            self.visit_case_tail(node.children[4], match_expr, end_label)
         return None
     def visit_func_checkif_statement(self, node):
         """

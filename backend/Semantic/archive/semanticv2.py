@@ -37,7 +37,7 @@ class SemanticAnalyzer(Visitor):
         self.current_function = None  # Track the current function name (if any)
         self.current_function = None  # Track the current function name (if any)
         self.loop_depth = 0  # Track nested loop depth for exit/next validation
-        self.switch_depth = 0  # Track nested switch depth
+        self.match_depth = 0  # Track nested match depth
         self.in_loop_block = False  # Flag to indicate if we're in a loop block
         self.has_return = False  # Track if the current function has a return statement
 
@@ -1250,13 +1250,13 @@ class SemanticAnalyzer(Visitor):
         if self.loop_depth == 0:
             self.in_loop_block = False
 
-    def enter_switch(self):
-        """Enter a switch statement context."""
-        self.switch_depth += 1
+    def enter_match(self):
+        """Enter a match statement context."""
+        self.match_depth += 1
 
-    def exit_switch(self):
-        """Exit a switch statement context."""
-        self.switch_depth -= 1
+    def exit_match(self):
+        """Exit a match statement context."""
+        self.match_depth -= 1
     
     def check_boolean_expr(self, expr_node, context):
         """
@@ -1426,17 +1426,17 @@ class SemanticAnalyzer(Visitor):
         
         return None
 
-    def visit_switch_statement(self, node):
+    def visit_match_statement(self, node):
         """
-        Semantic analysis for switch_statement.
-        Syntax: SWITCH LPAREN expression RPAREN LBRACE CASE literals COLON program case_tail default RBRACE
+        Semantic analysis for match_statement.
+        Syntax: match LPAREN expression RPAREN LBRACE CASE literals COLON program case_tail default RBRACE
         """
-        # Visit the switch expression
+        # Visit the match expression
         self.visit(node.children[2])
         
-        # Push scope and enter switch context
+        # Push scope and enter match context
         self.push_scope()
-        self.enter_switch()
+        self.enter_match()
         
         # Track case values to detect duplicates
         case_values = set()
@@ -1457,8 +1457,8 @@ class SemanticAnalyzer(Visitor):
         if len(node.children) > 10 and node.children[10]:
             self.visit(node.children[10])
         
-        # Exit switch and pop scope
-        self.exit_switch()
+        # Exit match and pop scope
+        self.exit_match()
         self.pop_scope()
         
         return None

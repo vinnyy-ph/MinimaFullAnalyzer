@@ -237,7 +237,7 @@ function getTokenColor(tokenType, theme) {
   }
   
   if ([
-    'var','fixed','group','func','throw','show','checkif','recheck','otherwise','switch',
+    'var','fixed','group','func','throw','show','checkif','recheck','otherwise','match',
     'case','default','exit','next','each','repeat','do','empty','get'
   ].includes(tokenLower)) {
     return colors.keyword;

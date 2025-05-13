@@ -46,7 +46,7 @@ def process_syntax_error(
     def categorize_tokens(tokens):
         KEYWORDS = {
             "var", "fixed", "group", "func", "throw", "show", "checkif",
-            "recheck", "otherwise", "switch", "case", "default", "exit",
+            "recheck", "otherwise", "match", "case", "default", "exit",
             "next", "each", "repeat", "do", "integer", "point", "state",
             "text", "empty", "get"
         }
