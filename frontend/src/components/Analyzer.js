@@ -6,6 +6,7 @@ import Errors from './Errors';
 import CodeOutput from './CodeOutput';
 import axios from 'axios';
 import logo from '../assets/logomnm.png'; 
+import Sidebar from './Sidebar';
 import { 
   Grid, 
   Box, 
@@ -52,7 +53,7 @@ import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import TableViewIcon from '@mui/icons-material/TableView';
 import CloseIcon from '@mui/icons-material/Close';
 
-const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
+const Analyzer = ({ toggleSidebar: parentToggleSidebar, themeMode, toggleTheme }) => {
   const [code, setCode] = useState('');
   const [tokens, setTokens] = useState([]);
   const [errors, setErrors] = useState([]);
@@ -90,6 +91,12 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
   const [symbolTableLoading, setSymbolTableLoading] = useState(false);
   const [symbolTableError, setSymbolTableError] = useState(null);
   const [symbolTableTab, setSymbolTableTab] = useState(0);
+
+  // Add debug mode state
+  const [debugMode, setDebugMode] = useState(false);
+
+  // Add state for sidebar open
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const theme = useTheme();
 
@@ -242,8 +249,13 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     }
   };
 
+  // Modified handleTabChange to allow switching between tabs 0 and 1 regardless of debug mode
   const handleTabChange = (event, newValue) => {
-    setRightPanelTab(newValue);
+    // In non-debug mode, allow switching between tabs 0 (Lexical) and 1 (Program Output)
+    // In debug mode, allow switching to any tab
+    if (newValue <= 1 || debugMode) {
+      setRightPanelTab(newValue);
+    }
   };
 
   // Auto-scroll to bottom of terminal output when it changes
@@ -566,6 +578,15 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     );
   };
 
+  // Handle sidebar toggle
+  const handleToggleSidebar = () => {
+    setSidebarOpen(!sidebarOpen);
+    // Also call the parent toggle if it exists
+    if (parentToggleSidebar) {
+      parentToggleSidebar();
+    }
+  };
+
   return (
     <div style={{ padding: '20px' }}>
       <Grid container spacing={2}>
@@ -590,7 +611,7 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
               }}
             >
               <IconButton 
-                onClick={toggleSidebar} 
+                onClick={handleToggleSidebar} 
                 sx={{ 
                   display: 'flex', 
                   alignItems: 'center', 
@@ -745,7 +766,7 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
           
           {/* Unified Error Messages */}
           <Box sx={{ mt: 2 }}>
-            <Errors errors={errors} terminalOutput={terminalOutput} />
+            <Errors errors={errors} terminalOutput={terminalOutput} debugMode={debugMode} />
           </Box>
         </Grid>
 
@@ -788,11 +809,13 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                   label="Program Output" 
                   iconPosition="start"
                 />
-                <Tab 
-                  icon={<CodeIcon />} 
-                  label="IR Representation" 
-                  iconPosition="start"
-                />
+                {debugMode && (
+                  <Tab 
+                    icon={<CodeIcon />} 
+                    label="IR Representation" 
+                    iconPosition="start"
+                  />
+                )}
               </Tabs>
             </Box>
             
@@ -801,7 +824,7 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
               {/* Lexical Token Stream Panel */}
               {rightPanelTab === 0 && (
                 <Box sx={{ height: '100%', padding: 3 }}>
-                  <OutputTable tokens={tokens} />
+                  <OutputTable tokens={tokens} debugMode={debugMode} />
                 </Box>
               )}
               
@@ -970,8 +993,8 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                             </Box>
                           )}
                           
-                          {/* Add AST and Symbol Table buttons */}
-                          {!waitingForInput && (
+                          {/* Only show these buttons in debug mode */}
+                          {debugMode && !waitingForInput && (
                             <Box 
                               sx={{ 
                                 display: 'flex', 
@@ -1046,8 +1069,8 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                 </Box>
               )}
               
-              {/* IR Representation Panel */}
-              {rightPanelTab === 2 && (
+              {/* IR Representation Panel - Only shown in debug mode */}
+              {debugMode && rightPanelTab === 2 && (
                 <Box sx={{ height: '100%', p: 0 }}>
                   <Box
                     sx={{
@@ -1478,6 +1501,14 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Update Sidebar component with correct props */}
+      <Sidebar 
+        open={sidebarOpen} 
+        toggleDrawer={handleToggleSidebar} 
+        debugMode={debugMode} 
+        setDebugMode={setDebugMode} 
+      />
     </div>
   );
 };

@@ -20,7 +20,7 @@ import {
 import CodeIcon from '@mui/icons-material/Code';
 import CloseIcon from '@mui/icons-material/Close';
 
-const OutputTable = ({ tokens }) => {
+const OutputTable = ({ tokens, debugMode }) => {
   // Remove any INVALID tokens but keep ALL other tokens
   const validTokens = tokens.filter(token => token.type !== 'INVALID');
   const theme = useTheme();
@@ -217,23 +217,26 @@ const OutputTable = ({ tokens }) => {
             <Typography variant="body2" color="text.secondary">
               Total tokens: {validTokens.length}
             </Typography>
-            <Button 
-              variant="outlined" 
-              size="small"
-              startIcon={<CodeIcon />}
-              onClick={handleOpenRawView}
-              disabled={validTokens.length === 0}
-              sx={{ 
-                textTransform: 'none',
-                borderColor: theme.palette.primary.main,
-                color: theme.palette.primary.main,
-                '&:hover': {
-                  backgroundColor: theme.palette.primary.main + '1A',  // 10% opacity
-                }
-              }}
-            >
-              Show Raw Token Output
-            </Button>
+            {/* Only show raw token output button in debug mode */}
+            {debugMode && (
+              <Button 
+                variant="outlined" 
+                size="small"
+                startIcon={<CodeIcon />}
+                onClick={handleOpenRawView}
+                disabled={validTokens.length === 0}
+                sx={{ 
+                  textTransform: 'none',
+                  borderColor: theme.palette.primary.main,
+                  color: theme.palette.primary.main,
+                  '&:hover': {
+                    backgroundColor: theme.palette.primary.main + '1A',  // 10% opacity
+                  }
+                }}
+              >
+                Show Raw Token Output
+              </Button>
+            )}
           </Box>
 
           {/* Raw Token Output Dialog */}

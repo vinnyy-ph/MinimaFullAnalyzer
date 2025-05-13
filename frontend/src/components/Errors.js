@@ -17,7 +17,7 @@ import ErrorIcon from '@mui/icons-material/Error';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import CodeIcon from '@mui/icons-material/Code';
 
-const Errors = ({ errors, terminalOutput = '' }) => {
+const Errors = ({ errors, terminalOutput = '', debugMode }) => {
   const theme = useTheme();
   const boxRef = useRef(null);
   const [tabIndex, setTabIndex] = useState(0);
@@ -28,12 +28,22 @@ const Errors = ({ errors, terminalOutput = '' }) => {
     }
   }, [errors, tabIndex, terminalOutput]);
 
+  // Reset to errors tab if user has terminal tab selected but debug mode gets turned off
+  useEffect(() => {
+    if (!debugMode && tabIndex === 1) {
+      setTabIndex(0);
+    }
+  }, [debugMode, tabIndex]);
+
   const lexicalErrors = errors.filter((error) => error.type === 'lexical');
   const syntaxErrors = errors.filter((error) => error.type === 'syntax');
   const semanticErrors = errors.filter((error) => error.type === 'semantic');
 
   const handleTabChange = (event, newValue) => {
-    setTabIndex(newValue);
+    // Only allow changing to terminal tab if debug mode is on
+    if (newValue === 0 || (newValue === 1 && debugMode)) {
+      setTabIndex(newValue);
+    }
   };
 
   const hasErrors = errors.length > 0;
@@ -366,11 +376,13 @@ const Errors = ({ errors, terminalOutput = '' }) => {
                 theme.palette.success.main
             }}
           />
-          <Tab 
-            icon={<TerminalIcon fontSize="small" />} 
-            label="Terminal Output" 
-            iconPosition="start"
-          />
+          {debugMode && (
+            <Tab 
+              icon={<TerminalIcon fontSize="small" />} 
+              label="Terminal Output" 
+              iconPosition="start"
+            />
+          )}
         </Tabs>
       </Box>
 
@@ -463,7 +475,7 @@ const Errors = ({ errors, terminalOutput = '' }) => {
         )}
 
         {/* Terminal Output Tab Content */}
-        {tabIndex === 1 && (
+        {debugMode && tabIndex === 1 && (
           <Box 
             sx={{ 
               height: '100%',
