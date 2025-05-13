@@ -201,19 +201,61 @@ const Errors = ({ errors, terminalOutput = '', debugMode }) => {
         const lineNumber = parseInt(line, 10);
         const columnNumber = parseInt(column, 10);
         
+        if (isNaN(lineNumber) || isNaN(columnNumber)) {
+          console.error(`Invalid line or column values: line=${line}, column=${column}`);
+          return;
+        }
+        
+        // Ensure the editor has a valid model
+        const model = window.editor.getModel();
+        if (!model) {
+          console.error('Editor has no model');
+          return;
+        }
+        
+        // Check if the line is within the bounds of the document
+        const lineCount = model.getLineCount();
+        if (lineNumber > lineCount) {
+          console.warn(`Line ${lineNumber} is out of bounds (max: ${lineCount})`);
+          return;
+        }
+        
         // Monaco uses 1-based line numbers and 1-based column numbers
         window.editor.revealPositionInCenter({
           lineNumber: lineNumber,
           column: columnNumber
         });
         
-        // Set selection at the error position
+        // Set selection at the error position with a wider selection for visibility
         window.editor.setSelection({
           startLineNumber: lineNumber,
-          startColumn: columnNumber,
+          startColumn: Math.max(1, columnNumber - 1),
           endLineNumber: lineNumber,
-          endColumn: columnNumber + 1
+          endColumn: columnNumber + 2
         });
+        
+        // Add a highlighted decoration to make the error location more visible
+        const decorations = window.editor.deltaDecorations([], [
+          {
+            range: {
+              startLineNumber: lineNumber,
+              startColumn: Math.max(1, columnNumber - 1),
+              endLineNumber: lineNumber,
+              endColumn: columnNumber + 2
+            },
+            options: {
+              className: 'error-highlight-decoration',
+              isWholeLine: false,
+              inlineClassName: 'error-inline-decoration',
+              stickiness: window.monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
+            }
+          }
+        ]);
+        
+        // Remove the decoration after 3 seconds
+        setTimeout(() => {
+          window.editor.deltaDecorations(decorations, []);
+        }, 3000);
         
         window.editor.focus();
       } catch (e) {
@@ -222,6 +264,54 @@ const Errors = ({ errors, terminalOutput = '', debugMode }) => {
     } else {
       console.warn('Editor not available. Cannot jump to position.');
     }
+  };
+
+  // Special formatting for lexer errors to ensure line/column data is properly displayed
+  const formatLexerError = (error) => {
+    // Check if error has direct line/column information
+    if (error.line !== undefined && error.column !== undefined) {
+      // Create a unique element ID for this error
+      const locationId = `lexer-err-${error.line}-${error.column}-${Math.random().toString(36).substring(2, 8)}`;
+      
+      // Format the message with highlighted line/column information
+      let formattedMessage = error.message;
+      
+      // Add location information if not already present in the message
+      if (!formattedMessage.includes('line') && !formattedMessage.includes('column')) {
+        formattedMessage += ` <span class="error-location" id="${locationId}" data-line="${error.line}" data-column="${error.column}">(at line ${error.line}, column ${error.column})</span>`;
+      } else {
+        // Replace existing line/column information with highlighted version
+        formattedMessage = formattedMessage.replace(
+          /(at\s+)?line\s+(\d+),\s+column\s+(\d+)/i,
+          `<span class="error-location" id="${locationId}" data-line="${error.line}" data-column="${error.column}">at line ${error.line}, column ${error.column}</span>`
+        );
+      }
+      
+      // Schedule the attachment of click handler
+      setTimeout(() => {
+        const elem = document.getElementById(locationId);
+        if (elem) {
+          // Remove any existing click handlers to prevent duplicates
+          const newElem = elem.cloneNode(true);
+          elem.parentNode.replaceChild(newElem, elem);
+          
+          newElem.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            jumpToErrorLocation(error.line, error.column);
+          });
+          
+          // Add title and styling
+          newElem.title = "Click to jump to this location in the editor";
+          newElem.style.cursor = "pointer";
+        }
+      }, 10);
+      
+      return formattedMessage;
+    }
+    
+    // If no direct line/column info, fall back to extracting from the message
+    return formatErrorMessage(error.message);
   };
 
   // Check for line and column information in error messages
@@ -237,6 +327,9 @@ const Errors = ({ errors, terminalOutput = '', debugMode }) => {
     
     // 3. "Runtime Error at line X, column Y" format
     const runtimeErrorPattern = /Runtime\s+Error(?:\s+at\s+line\s+|\s*\(?line\s*|\s+\(?line\s+)(\d+)(?:,\s*(?:col(?:umn)?\s*)?(\d+))?/i;
+    
+    // 4. Lexer specific error pattern - captures line/column information for lexer errors
+    const lexerErrorPattern = /.*?['"](.*?)['"].*?(?:line|at)\s+(\d+)(?:,\s*(?:col(?:umn)?\s*)?(\d+))?/i;
     
     let match;
     
@@ -257,10 +350,29 @@ const Errors = ({ errors, terminalOutput = '', debugMode }) => {
       };
     }
     
+    if (match = errorMessage.match(lexerErrorPattern)) {
+      return {
+        line: parseInt(match[2], 10),
+        column: match[3] ? parseInt(match[3], 10) : 1, // Default to column 1 if not specified
+        hasLocation: true,
+        value: match[1] // Capture the problematic value for better context
+      };
+    }
+    
     if (match = errorMessage.match(lineOnlyPattern)) {
       return {
         line: parseInt(match[1], 10),
         column: 1, // Default to column 1 when only line is mentioned
+        hasLocation: true
+      };
+    }
+    
+    // Direct line and column properties from error object
+    const directLineColMatch = /^line:(\d+),\s*column:(\d+)$/i.exec(errorMessage);
+    if (directLineColMatch) {
+      return {
+        line: parseInt(directLineColMatch[1], 10),
+        column: parseInt(directLineColMatch[2], 10),
         hasLocation: true
       };
     }
@@ -272,32 +384,62 @@ const Errors = ({ errors, terminalOutput = '', debugMode }) => {
   const formatErrorMessage = (errorMessage) => {
     if (!errorMessage) return "Error";
     
-    const { hasLocation, line, column } = extractLineColumnInfo(errorMessage);
+    const { hasLocation, line, column, value } = extractLineColumnInfo(errorMessage);
     
     if (hasLocation) {
       // Create a unique ID for this error location element
       const locationId = `err-loc-${line}-${column}-${Math.random().toString(36).substring(2, 9)}`;
       
-      // Replace the line/column info with highlighted version that has a data attribute
-      const highlighted = errorMessage.replace(
+      // Pattern to match any of the line/column formats we support
+      const lineColPatterns = [
         /(at\s+)?line\s+(\d+),\s+column\s+(\d+)/i,
-        `<span class="error-location" id="${locationId}" data-line="${line}" data-column="${column}">at line ${line}, column ${column}</span>`
-      );
+        /(Runtime\s+Error(?:\s+at\s+line\s+|\s*\(?line\s*|\s+\(?line\s+)(\d+)(?:,\s*(?:col(?:umn)?\s*)?(\d+))?)/i,
+        /(at\s+)?line\s+(\d+)(?!\s*,\s*column)/i,
+        /(line:(\d+),\s*column:(\d+))/i
+      ];
       
-      // Schedule the addition of click handler after the component renders
+      // Check each pattern and replace the first match
+      let highlighted = errorMessage;
+      let matchFound = false;
+      
+      for (const pattern of lineColPatterns) {
+        if (pattern.test(errorMessage)) {
+          // Replace the matched pattern with the highlighted span
+          highlighted = errorMessage.replace(
+            pattern,
+            `<span class="error-location" id="${locationId}" data-line="${line}" data-column="${column}">at line ${line}, column ${column}</span>`
+          );
+          matchFound = true;
+          break;
+        }
+      }
+      
+      // If no match was found but we know there's a location, add it at the end
+      if (!matchFound) {
+        highlighted = `${errorMessage} <span class="error-location" id="${locationId}" data-line="${line}" data-column="${column}">(at line ${line}, column ${column})</span>`;
+      }
+      
+      // Use a more reliable way to attach the click handler
       setTimeout(() => {
         const elem = document.getElementById(locationId);
         if (elem) {
-          elem.addEventListener('click', (e) => {
+          // Remove any existing click handlers to prevent duplicates
+          const newElem = elem.cloneNode(true);
+          elem.parentNode.replaceChild(newElem, elem);
+          
+          newElem.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
             jumpToErrorLocation(line, column);
           });
           
           // Add title for better UX
-          elem.title = "Click to jump to this location in the editor";
+          newElem.title = "Click to jump to this location in the editor";
+          
+          // Add visual indication that this is clickable
+          newElem.style.cursor = "pointer";
         }
-      }, 0);
+      }, 10);
       
       return highlighted;
     }
@@ -307,8 +449,10 @@ const Errors = ({ errors, terminalOutput = '', debugMode }) => {
 
   // Helper to format each individual error
   const renderErrorItem = (error, index) => {
-    let formattedMessage = 
-      error.message && error.message !== 'Error' ? formatErrorMessage(error.message) : 'Error';
+    // For lexical errors, use the specialized formatter that better handles line/column information
+    let formattedMessage = error.type === 'lexical' && error.line !== undefined && error.column !== undefined 
+      ? formatLexerError(error) 
+      : (error.message && error.message !== 'Error' ? formatErrorMessage(error.message) : 'Error');
     
     return (
       <Box
@@ -342,7 +486,7 @@ const Errors = ({ errors, terminalOutput = '', debugMode }) => {
                 fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
                 fontWeight: 'medium',
                 mb: 0.5,
-                '& .error-location': {  // Add styling for error location highlights
+                '& .error-location': {  // Enhanced styling for error location highlights
                   fontWeight: 'bold',
                   color: theme.palette.error.main,
                   textDecoration: 'underline',
@@ -353,11 +497,24 @@ const Errors = ({ errors, terminalOutput = '', debugMode }) => {
                     ? 'rgba(244, 67, 54, 0.15)' 
                     : 'rgba(244, 67, 54, 0.08)',
                   transition: 'all 0.2s',
+                  display: 'inline-block',
+                  margin: '0 2px',
+                  border: `1px dashed ${theme.palette.error.main}`,
+                  position: 'relative',
                   '&:hover': {
                     backgroundColor: theme.palette.mode === 'dark' 
-                      ? 'rgba(244, 67, 54, 0.25)' 
-                      : 'rgba(244, 67, 54, 0.15)',
+                      ? 'rgba(244, 67, 54, 0.35)' 
+                      : 'rgba(244, 67, 54, 0.25)',
+                    transform: 'scale(1.05)',
+                    fontWeight: 800,
+                    boxShadow: `0 0 4px ${theme.palette.error.main}`,
                     textDecoration: 'underline'
+                  },
+                  '&::before': {
+                    content: '"⮞"',
+                    position: 'relative',
+                    marginRight: '3px',
+                    fontSize: '0.85em'
                   }
                 }
               }}
