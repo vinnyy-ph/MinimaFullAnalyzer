@@ -29,6 +29,26 @@ REPEAT: "repeat"
 DO: "do"
 EMPTY: "empty"
 FUNC: "func"
+ABS: "abs"
+CEIL: "ceil"
+CONTAINS: "contains"
+FACTORIAL: "factorial"
+FLOOR: "floor"
+ISQRT: "isqrt"
+JOIN: "join"
+LENGTH: "length"
+LOWERCASE: "lowercase"
+MAX: "max"
+MIN: "min"
+POW: "pow"
+REVERSE: "reverse"
+ROUND: "round"
+SLICE: "slice"
+SORTED: "sorted"
+SUM: "sum"
+TYPE: "type"
+UNIQUE: "unique"
+UPPERCASE: "uppercase"
 
 OR_OP: "||"
 AND_OP: "&&"
@@ -64,7 +84,7 @@ POINT: "point"
 STATE: "state"
 TEXT: "text"
 
-IDENTIFIER: /(?!(?:var|fixed|group|func|throw|show|checkif|recheck|otherwise|match|case|default|exit|next|each|repeat|do|integer|point|state|text|empty|get)(?![a-zA-Z0-9_]))[a-z][a-zA-Z0-9_]*/
+IDENTIFIER: /(?!(?:var|fixed|group|func|throw|show|checkif|recheck|otherwise|match|case|default|exit|next|each|repeat|do|integer|point|state|text|empty|get|abs|ceil|contains|factorial|floor|isqrt|join|length|lowercase|max|min|pow|reverse|round|slice|sorted|sum|type|unique|uppercase)(?![a-zA-Z0-9_]))[a-z][a-zA-Z0-9_]*/
 INTEGERLITERAL: /[0-9]{1,9}/
 POINTLITERAL: /[0-9]{1,9}\.[0-9]{1,9}/
 NEGINTEGERLITERAL: /-[0-9]{1,9}/
@@ -110,6 +130,27 @@ list_tail: COMMA expression list_tail
          | 
 
 id_usage: IDENTIFIER id_usagetail
+        | ABS id_usagetail
+        | CEIL id_usagetail
+        | CONTAINS id_usagetail
+        | FACTORIAL id_usagetail
+        | FLOOR id_usagetail
+        | ISQRT id_usagetail
+        | JOIN id_usagetail
+        | LENGTH id_usagetail
+        | LOWERCASE id_usagetail
+        | MAX id_usagetail
+        | MIN id_usagetail
+        | POW id_usagetail
+        | REVERSE id_usagetail
+        | ROUND id_usagetail
+        | SLICE id_usagetail
+        | SORTED id_usagetail
+        | SUM id_usagetail
+        | TYPE id_usagetail
+        | UNIQUE id_usagetail
+        | UPPERCASE id_usagetail
+        
 
 ?id_usagetail: group_or_list unary_op
              | func_call
