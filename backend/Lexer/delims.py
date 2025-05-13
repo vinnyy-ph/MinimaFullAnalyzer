@@ -65,7 +65,7 @@ valid_delimiters_symbol_dict = {
     '+':  [' ', '(', '-', '"', '#', '\n', '\t', '!', 'Y', 'N']
             + list('abcdefghijklmnopqrstuvwxyz0123456789'),
     '++': [' ', ')', ';', '}', ',', '<', '=','>', '#', '\n', '\t', '+', '-', '/','*','%', '!',']'],
-    '+=': [' ', '(', '-', '#', '\n', '\t', 'Y', 'N', '!']
+    '+=': [' ', '(', '-', '#', '\n', '\t', 'Y', 'N', '!', '[']
             + list('abcdefghijklmnopqrstuvwxyz0123456789'),
     '-':  [' ', '(', '-', '#', '\n', '\t', 'Y', 'N', '!']
             + list('abcdefghijklmnopqrstuvwxyz0123456789'),
