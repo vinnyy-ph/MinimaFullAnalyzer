@@ -13,11 +13,11 @@ import {
 } from '@mui/material';
 
 const OutputTable = ({ tokens }) => {
+  // Remove any INVALID tokens but keep ALL other tokens
   const validTokens = tokens.filter(token => token.type !== 'INVALID');
   const theme = useTheme();
 
   return (
-    // CHANGED: Removed overflow: 'hidden' and added minHeight: 0
     <Box sx={{ 
       height: '100%', 
       display: 'flex', 
@@ -62,15 +62,23 @@ const OutputTable = ({ tokens }) => {
           </Typography>
         </Box>
       ) : (
-        // CHANGED: Make this a flexible box with minHeight: 0 so it can scroll
         <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0 }}>
+          {/* Add debug info during development */}
+          {/*<Box sx={{ mb: 2 }}>
+            <Typography variant="caption">
+              Debug: Found {validTokens.length} tokens to display
+            </Typography>
+            <pre style={{ fontSize: '10px' }}>
+              {JSON.stringify(validTokens, null, 2)}
+            </pre>
+          </Box>*/}
+          
           <TableContainer 
             component={Paper} 
             sx={{ 
               background: theme.palette.background.paper,
               border: `1px solid ${theme.palette.divider}`,
               borderRadius: 1,
-              // CHANGED: Use flexGrow and minHeight: 0 to allow vertical scroll
               flexGrow: 1,
               minHeight: 0,
               maxHeight: '100%',   

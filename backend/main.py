@@ -19,17 +19,16 @@ def analyze_full():
     output_buffer = io.StringIO()
     with redirect_stdout(output_buffer):
         lexer = Lexer(code)
+        all_tokens = lexer.tokenize_all()
         tokens = []
-        while True:
-            token = lexer.get_next_token()
-            if token is None:
-                break
+        for token in all_tokens:
             tokens.append({
                 'type': token.type,
                 'value': token.value,
                 'line': token.line,
                 'column': token.column
             })
+        
         lexical_errors = [error.to_dict() for error in lexer.errors]
         syntax_errors = []
         semantic_errors = []

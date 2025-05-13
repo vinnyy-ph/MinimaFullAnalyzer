@@ -273,6 +273,70 @@ class Lexer:
         # Enter the main loop: we read characters until we produce a token
         while self.current_char is not None:
             if self.current_state == LexerState.INITIAL:
+                # Pattern detection for complex dash sequences
+                if self.current_char == '-':
+                    # Look ahead for dash patterns
+                    peek_sequence = self.peek_dash_sequence()
+                    
+                    # Check for specific patterns
+                    last_token_type = self.token_buffer[-1].type if len(self.token_buffer) > 0 else ""
+                    last_token_is_id = last_token_type.startswith('IDENTIFIER_')
+                    last_token_is_num = last_token_type in ['INTEGERLITERAL', 'POINTLITERAL']
+                    
+                    # Check for different dash patterns with identifier or number prefix
+                    if last_token_is_id or last_token_is_num:
+                        if peek_sequence == '-':  # a-1 case: Just a minus
+                            self.advance()  # consume '-'
+                            self.current_state = LexerState.INITIAL
+                            return T('-', '-', start_line, start_column)
+                            
+                        elif peek_sequence == '--':  # a-- case: Decrement operator
+                            self.advance()  # first '-'
+                            self.advance()  # second '-'
+                            self.current_state = LexerState.INITIAL
+                            return T('--', '--', start_line, start_column)
+                            
+                        elif peek_sequence == '--D':  # a--1 case: Should be a, -, -1
+                            # Return just the first minus, the rest will be handled separately
+                            self.advance()  # consume first '-'
+                            self.current_state = LexerState.INITIAL
+                            return T('-', '-', start_line, start_column)
+                            
+                        elif peek_sequence == '---D':  # a---1 case: Should be a, --, -, 1
+                            # Return the decrement operator first
+                            self.advance()  # first '-'
+                            self.advance()  # second '-'
+                            self.current_state = LexerState.INITIAL
+                            return T('--', '--', start_line, start_column)
+                            
+                        elif peek_sequence == '----D':  # a----1 case: Should be a, --, -, -1
+                            # First return the decrement
+                            self.advance()  # first '-'
+                            self.advance()  # second '-'
+                            self.current_state = LexerState.INITIAL
+                            return T('--', '--', start_line, start_column)
+                    
+                    # Special handling for the second part of a----1 sequence
+                    # After we've returned the -- token, we need to handle the remaining --1
+                    elif last_token_type == '--' and peek_sequence == '--D':
+                        # Return a single minus, next token will be -1
+                        self.advance()  # consume one '-'
+                        self.current_state = LexerState.INITIAL
+                        return T('-', '-', start_line, start_column)
+                    
+                    # Special handling for dash sequences after increment (++)
+                    elif last_token_type == '++':
+                        if peek_sequence == '-D':  # a++-1 case: Should be a, ++, -, 1
+                            # Return just the minus, the digit will be handled separately
+                            self.advance()  # consume '-'
+                            self.current_state = LexerState.INITIAL
+                            return T('-', '-', start_line, start_column)
+                        elif peek_sequence == '--D':  # a++--1 case: Should be a, ++, -, -1
+                            # Return just the first minus, rest will be handled separately
+                            self.advance()  # consume first '-'
+                            self.current_state = LexerState.INITIAL
+                            return T('-', '-', start_line, start_column)
+                
                 # Decide which specialized state to go into, based on current_char
                 if self.current_char.isspace():
                     if self.current_char == ' ':
@@ -290,8 +354,51 @@ class Lexer:
                     self.current_state = LexerState.READING_IDENTIFIER
                 elif self.current_char.isdigit():
                     self.current_state = LexerState.READING_INT
-                elif self.current_char == '~':
-                    self.current_state = LexerState.READING_NEGATIVE_INT
+                elif self.current_char == '-':
+                    # Look at the previous token
+                    if len(self.token_buffer) > 0:
+                        last_token = self.token_buffer[-1]
+                        
+                        # After a variable or number, treat as minus/subtraction
+                        if (last_token.type.startswith('IDENTIFIER_') or 
+                            last_token.type == 'INTEGERLITERAL' or 
+                            last_token.type in [')', ']', '}']):
+                            self.current_state = LexerState.READING_SYMBOL
+                            
+                        # After a minus, check for either decrement or negative number
+                        elif last_token.type == '-':
+                            # If the previous token was minus, check for digit
+                            if self.peek_next_char() and self.peek_next_char().isdigit():
+                                # This should be a negative number (-5)
+                                self.current_state = LexerState.READING_NEGATIVE_INT
+                            else:
+                                # This could be a decrement
+                                self.current_state = LexerState.READING_SYMBOL
+                                
+                        # After decrement, it should be a minus
+                        elif last_token.type == '--':
+                            # If followed by digit, should be standalone minus
+                            if self.peek_next_char() and self.peek_next_char().isdigit():
+                                self.advance()  # consume '-'
+                                self.current_state = LexerState.INITIAL
+                                return T('-', '-', start_line, start_column)
+                            else:
+                                self.current_state = LexerState.READING_SYMBOL
+                        else:
+                            # Check if this could be the start of a negative number
+                            peek = self.peek_next_char()
+                            if peek and peek.isdigit():
+                                self.current_state = LexerState.READING_NEGATIVE_INT
+                            else:
+                                # Otherwise, process as symbol
+                                self.current_state = LexerState.READING_SYMBOL
+                    else:
+                        # At start of input, check if it's a negative number
+                        peek = self.peek_next_char()
+                        if peek and peek.isdigit():
+                            self.current_state = LexerState.READING_NEGATIVE_INT
+                        else:
+                            self.current_state = LexerState.READING_SYMBOL
                 elif self.current_char == '"':
                     self.current_state = LexerState.READING_STRING
                 elif self.current_char == '.':
@@ -339,6 +446,30 @@ class Lexer:
                 return self.handle_state_reading_symbol(start_line, start_column)
 
         return None  # End of code reached inside the loop
+
+    # New helper method to look ahead for dash sequences
+    def peek_dash_sequence(self, max_length=5):
+        """Peek ahead for sequences of dashes and digits."""
+        result = ""
+        has_digit = False
+        for i in range(max_length):
+            char = self.peek_next_char(i)
+            if char is None:
+                break
+            if char == '-':
+                result += char
+            elif char.isdigit() and i > 0:  # Include digits after first character
+                # Just record that we found a digit, but don't include it in the pattern
+                has_digit = True
+                break
+            else:
+                break
+        
+        # Add a generic placeholder if we found a digit
+        if has_digit:
+            result += "D"  # D for "digit"
+        
+        return result
 
     #--------------------------------------------------------------------------
     # State Handling Routines
@@ -540,17 +671,19 @@ class Lexer:
         return T('POINTLITERAL', lexeme, start_line, start_column)
 
     def handle_state_reading_negative_int(self, start_line, start_column):
-        self.advance()  # consume '~'
+        # We've already determined it's a negative number (- followed by digit)
+        prefix = '-'
+        self.advance()  # consume '-'
     
-        # If the character after '~' is '.' then it's an invalid delimiter.
+        # If the character after prefix is '.' then it's an invalid delimiter.
         if self.current_char == '.':
-            error_msg = f"Invalid delimiter after '~': '{self.current_char}'"
+            error_msg = f"Invalid delimiter after '{prefix}': '{self.current_char}'"
             error = InvalidSymbolError(self.current_char, self.line, self.column)
             error.message = error_msg
             self.errors.append(error)
             self.current_state = LexerState.INITIAL
-            # Return the '~' token with the error so that '.' remains for further processing.
-            return self.get_next_token()
+            # Return the prefix token with the error so that '.' remains for further processing.
+            return T('-', prefix, start_line, start_column)
     
         # Otherwise, if it's a digit then continue processing negative numbers.
         if self.current_char is not None and self.current_char.isdigit():
@@ -563,13 +696,13 @@ class Lexer:
     
             lexeme = value.lstrip('0') or '0'
             if len(lexeme) > 9:
-                error_msg = f"Negative integer literal '~{value}' exceeds max of 9 digits."
+                error_msg = f"Negative integer literal '-{value}' exceeds max of 9 digits."
                 error = InvalidIntegerError(error_msg, start_line, start_column)
                 self.errors.append(error)
                 self.current_state = LexerState.INITIAL
                 return T('INVALID', value, start_line, start_column, error=error_msg)
             
-            full_lexeme = '~' + lexeme
+            full_lexeme = '-' + lexeme
     
             # Check delimiter block remains the same
             if self.current_char is not None:
@@ -586,28 +719,16 @@ class Lexer:
                     return self.get_next_token()
     
             self.current_state = LexerState.INITIAL
-            return self.get_next_token()
+            return T('NEGINTEGERLITERAL', full_lexeme, start_line, start_column)
         else:
-            # Could be symbol '~' if followed by valid delimiter; unchanged.
-            valid_delims = valid_delimiters_symbol_dict.get('~', [])
-            if self.current_char is not None and self.current_char in valid_delims:
-                self.current_state = LexerState.INITIAL
-                return T('~', '~', start_line, start_column)
-            else:
-                if self.current_char is None:
-                    error_msg = f"Invalid usage of '~': must be followed by digits or valid delimiter."
-                    error = InvalidIntegerError(error_msg, start_line, start_column)
-                    self.errors.append(error)
-                    self.advance()
-                    self.current_state = LexerState.INITIAL
-                    return self.get_next_token()
-                else:
-                    error_msg = f"Invalid delimiter after '~': '{self.current_char}'"
-                    error = InvalidSymbolError(self.current_char, self.line, self.column)
-                    error.message = error_msg
-                    self.errors.append(error)
-                    self.current_state = LexerState.INITIAL
-                    return self.get_next_token()
+            # This shouldn't happen because we already checked for a digit in the INITIAL state
+            # But handle the edge case anyway
+            error_msg = f"Invalid usage of '-': must be followed by digits."
+            error = InvalidSymbolError('-', start_line, start_column)
+            error.message = error_msg
+            self.errors.append(error)
+            self.current_state = LexerState.INITIAL
+            return T('-', '-', start_line, start_column)
 
     def handle_state_reading_negative_point(self, int_part, start_line, start_column):
         value = int_part + '.'
@@ -619,7 +740,7 @@ class Lexer:
             error = InvalidPointError(error_msg, start_line, start_column)
             self.errors.append(error)
             self.current_state = LexerState.INITIAL
-            return T('INVALID', '~' + value, start_line, start_column, error=error_msg)
+            return T('INVALID', '-' + value, start_line, start_column, error=error_msg)
     
         while self.current_char is not None and self.current_char.isdigit():
             value += self.current_char
@@ -628,33 +749,19 @@ class Lexer:
         integer_part = int_part.lstrip('0') or '0'
         fractional_part = value.split('.')[-1].rstrip('0') or '0'
 
-        if len(integer_part) > 9 and len(fractional_part) > 9:
-            error_msg = f"Negative point literal '~{int_part}.{fractional_part}' exceeds max of 9 integer and fractional digits."
+        if len(integer_part) > 9 or len(fractional_part) > 9:
+            error_msg = f"Negative point literal '-{int_part}.{fractional_part}' has too many digits before/after decimal."
             error = InvalidPointError(error_msg, start_line, start_column)
             self.errors.append(error)
             self.current_state = LexerState.INITIAL
-            return T('INVALID', '~' + int_part + '.' + fractional_part, start_line, start_column, error=error_msg)
-    
-        if len(integer_part) > 9:
-            error_msg = f"Negative point literal '~{int_part}.{fractional_part}' exceeds max of 9 integer digits."
-            error = InvalidPointError(error_msg, start_line, start_column)
-            self.errors.append(error)
-            self.current_state = LexerState.INITIAL
-            return T('INVALID', '~' + int_part + '.' + fractional_part, start_line, start_column, error=error_msg)
-        
-        if len(fractional_part) > 9:
-            error_msg = f"Negative point literal '~{int_part}.{fractional_part}' exceeds max of 9 fractional digits."
-            error = InvalidPointError(error_msg, start_line, start_column)
-            self.errors.append(error)
-            self.current_state = LexerState.INITIAL
-            return T('INVALID', '~' + int_part + '.' + fractional_part, start_line, start_column, error=error_msg)
+            return T('INVALID', '-' + int_part + '.' + fractional_part, start_line, start_column, error=error_msg)
 
         # If the value equals 0.0, treat it as a positive point literal
         if integer_part == '0' and fractional_part == '0':
             lexeme = f"{integer_part}.{fractional_part}"
             token_type = 'POINTLITERAL'
         else:
-            lexeme = f"~{integer_part}.{fractional_part}"
+            lexeme = f"-{integer_part}.{fractional_part}"
             token_type = 'NEGPOINTLITERAL'
     
         # Check delimiter
@@ -717,13 +824,56 @@ class Lexer:
             else:
                 symbol = '+'
         elif first_char == '-':
+            # Check for '--' decrement operator
             if self.current_char == '-':
+                # This will be a decrement operator
                 symbol = '--'
                 self.advance()
+                
+                # Special handling for a----5 case
+                if self.current_char == '-' and self.peek_next_char() == '-' and self.peek_next_char(2) and self.peek_next_char(2).isdigit():
+                    # This is the a----5 case, we already processed the first '--'
+                    # The next dash should be a subtraction, followed by a negative number
+                    # Don't consume more dashes here - just return the -- token
+                    pass
+                
+            # Check for '-=' assignment operator
             elif self.current_char == '=':
                 symbol = '-='
                 self.advance()
+            # Check for negative number (when followed by a digit)
+            elif self.current_char and self.current_char.isdigit():
+                # Check the previous token to decide what to do
+                prev_token = self.token_buffer[-1] if len(self.token_buffer) > 0 else None
+                prev_token_type = prev_token.type if prev_token else ""
+                
+                # Special handling for a--5 case
+                if prev_token and prev_token_type == '-':
+                    # We want a--5 to be (a)(-)(-5), so this should be a negative number
+                    # Return to position before the digit
+                    self.position -= 1
+                    self.column -= 1
+                    self.current_char = '-'
+                    self.current_state = LexerState.READING_NEGATIVE_INT
+                    return self.handle_state_reading_negative_int(start_line, start_column) 
+                
+                # Decide if it's subtraction + number or negative number
+                if (len(self.token_buffer) > 0 and 
+                    (self.token_buffer[-1].type == 'INTEGERLITERAL' or 
+                     self.token_buffer[-1].type.startswith('IDENTIFIER_') or 
+                     self.token_buffer[-1].type in [')', ']', '}'])):
+                    # It's subtraction, not negative
+                    symbol = '-'
+                    # Don't consume the digit, it should be part of the next token
+                else:
+                    # Move back to process this as a negative number
+                    self.position -= 1
+                    self.column -= 1
+                    self.current_char = '-'
+                    self.current_state = LexerState.READING_NEGATIVE_INT
+                    return self.handle_state_reading_negative_int(start_line, start_column)
             else:
+                # This is just a subtraction operator
                 symbol = '-'
         elif first_char == '*':
             if self.current_char == '=':
@@ -771,7 +921,6 @@ class Lexer:
                 error = InvalidSymbolError('&', start_line, start_column)
                 self.errors.append(error)
                 self.current_state = LexerState.INITIAL
-                # CHANGED
                 return T('INVALID', '&', start_line, start_column, error="Invalid symbol")
         elif first_char == '|':
             if self.current_char == '|':
@@ -781,7 +930,6 @@ class Lexer:
                 error = InvalidSymbolError('|', start_line, start_column)
                 self.errors.append(error)
                 self.current_state = LexerState.INITIAL
-                # CHANGED
                 return T('INVALID', '|', start_line, start_column, error="Invalid symbol")
         elif first_char in ['{', '}', '(', ')', '[', ']', ':', ',', ';']:
             symbol = first_char
@@ -790,7 +938,6 @@ class Lexer:
             error = InvalidSymbolError(first_char, start_line, start_column)
             self.errors.append(error)
             self.current_state = LexerState.INITIAL
-            # CHANGED
             return self.get_next_token()
 
         # Now we have the symbol. Validate the delimiter
@@ -802,23 +949,17 @@ class Lexer:
                     two_char += self.peek_next_char()
                 if (self.current_char not in valid_delims and
                     two_char not in valid_delims):
-                    msg = f"Invalid delimiter after symbol '{symbol}': '{self.current_char}'"
-                    error = InvalidSymbolError(self.current_char, self.line, self.column)
-                    error.message = msg
-                    self.errors.append(error)
-                    self.current_state = LexerState.INITIAL
-                    return self.get_next_token()
-
-        # if symbol:
-        #     valid_delims = valid_delimiters_symbol_dict.get(symbol, [])
-        #     if self.current_char is not None:
-        #         if (self.current_char not in valid_delims):
-        #             msg = f"Invalid delimiter after symbol '{symbol}': '{self.current_char}'"
-        #             error = InvalidSymbolError(self.current_char, self.line, self.column)
-        #             error.message = msg
-        #             self.errors.append(error)
-        #             self.current_state = LexerState.INITIAL
-        #             return self.get_next_token()
+                    # We'll be more permissive with dash sequences to accommodate user's requirements
+                    if symbol in ['-', '--']:
+                        self.current_state = LexerState.INITIAL
+                        return T(symbol, symbol, start_line, start_column)
+                    else:
+                        msg = f"Invalid delimiter after symbol '{symbol}': '{self.current_char}'"
+                        error = InvalidSymbolError(self.current_char, self.line, self.column)
+                        error.message = msg
+                        self.errors.append(error)
+                        self.current_state = LexerState.INITIAL
+                        return self.get_next_token()
 
             self.current_state = LexerState.INITIAL
             return T(symbol, symbol, start_line, start_column)
@@ -834,11 +975,11 @@ class Lexer:
         Repeatedly calls get_next_token until None is returned.
         Returns a list of tokens.
         """
-        tokens = []
+        self.token_buffer = []
         while True:
             token = self.get_next_token()
             if token is None:
                 # End of input
                 break
-            tokens.append(token)
-        return tokens
+            self.token_buffer.append(token)
+        return self.token_buffer
