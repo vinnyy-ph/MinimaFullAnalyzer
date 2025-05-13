@@ -62,6 +62,148 @@ def analyze_full():
         'semanticErrors': semantic_errors,
         'terminalOutput': terminal_output
     })
+@app.route('/getSymbolTable', methods=['POST'])
+def get_symbol_table():
+    data = request.get_json()
+    code = data.get('code', '')
+    
+    if not code:
+        return jsonify({
+            'success': False,
+            'error': 'No code provided'
+        })
+    
+    try:
+        # First check for lexical errors
+        lexer = Lexer(code)
+        all_tokens = lexer.tokenize_all()
+        lexical_errors = lexer.errors
+        
+        if lexical_errors:
+            return jsonify({
+                'success': False,
+                'error': 'Lexical errors detected. Cannot generate symbol table.'
+            })
+        
+        # If no lexical errors, try to parse
+        success, result = analyze_syntax(code)
+        if not success:
+            return jsonify({
+                'success': False,
+                'error': 'Syntax errors detected. Cannot generate symbol table.',
+                'syntaxError': result
+            })
+        
+        # Run semantic analysis to build the symbol table
+        semantic_analyzer = SemanticAnalyzer()
+        semantic_analyzer.analyze(result)
+        
+        if semantic_analyzer.errors:
+            # If there are semantic errors, we still return the symbol table but flag the issues
+            has_errors = True
+        else:
+            has_errors = False
+        
+        # Convert the symbol table to a JSON-friendly format
+        symbols = []
+        
+        # Dictionary to track which functions variables belong to
+        function_scopes = {}
+        
+        # First, collect function definitions to initialize function_scopes
+        for name, symbol in semantic_analyzer.global_scope.functions.items():
+            return_type = "empty"
+            if name in semantic_analyzer.function_returns:
+                return_info = semantic_analyzer.function_returns[name]
+                if isinstance(return_info, tuple) and len(return_info) >= 1:
+                    return_type = return_info[0]
+            
+            symbols.append({
+                'name': name,
+                'kind': 'function',
+                'scope': 'global',
+                'params': symbol.params,
+                'returnType': return_type,
+                'line': symbol.line,
+                'column': symbol.column
+            })
+            
+            # Initialize scope tracking for this function
+            function_scopes[name] = []
+        
+        # Helper function to recursively process all scopes
+        def process_symbol_table(scope, parent_scope_name=None):
+            # Process variables in this scope
+            for name, symbol in scope.variables.items():
+                var_type = "unknown"
+                var_value = None
+                
+                if hasattr(symbol, "value") and symbol.value:
+                    if isinstance(symbol.value, tuple) and len(symbol.value) >= 1:
+                        var_type = symbol.value[0]
+                        if len(symbol.value) >= 2:
+                            var_value = str(symbol.value[1]) if symbol.value[1] is not None else "null"
+                
+                # Determine the scope type
+                scope_type = "global"
+                if parent_scope_name:
+                    scope_type = f"local:{parent_scope_name}"
+                
+                symbol_info = {
+                    'name': name,
+                    'kind': 'variable',
+                    'scope': scope_type,
+                    'type': var_type,
+                    'value': var_value,
+                    'fixed': symbol.fixed,
+                    'line': symbol.line,
+                    'column': symbol.column
+                }
+                
+                symbols.append(symbol_info)
+                
+                # If this is a function parameter, track it
+                if parent_scope_name and name in semantic_analyzer.global_scope.functions.get(parent_scope_name, {}).params:
+                    symbol_info['isParameter'] = True
+                
+                # Track local variables for each function
+                if parent_scope_name and parent_scope_name in function_scopes:
+                    function_scopes[parent_scope_name].append(symbol_info)
+        
+        # Process all global variables
+        process_symbol_table(semantic_analyzer.global_scope)
+        
+        # Process function scopes
+        for function_name, function_locals in semantic_analyzer.function_scopes.items():
+            if function_locals:
+                # We need to store the parameter values separately since they are stored in the scope
+                for local_scope in function_locals:
+                    process_symbol_table(local_scope, function_name)
+        
+        # Add built-in functions
+        builtin_functions = semantic_analyzer.builtin_functions
+        for name, info in builtin_functions.items():
+            symbols.append({
+                'name': name,
+                'kind': 'function',
+                'scope': 'builtin',
+                'params': info.get('params', -1),  # -1 means variable arguments
+                'returnType': info.get('return_type', 'unknown'),
+                'isBuiltin': True
+            })
+        
+        return jsonify({
+            'success': True,
+            'symbols': symbols,
+            'hasErrors': has_errors
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': f'Error generating symbol table: {str(e)}'
+        })
 @app.route('/getAST', methods=['POST'])
 def get_ast():
     data = request.get_json()

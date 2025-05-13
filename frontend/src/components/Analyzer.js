@@ -28,7 +28,14 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions
+  DialogActions,
+  TableContainer,
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  Chip
 } from '@mui/material';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
@@ -77,6 +84,12 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
   // Terminal specific refs and states
   const terminalRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Add new state for Symbol Table
+  const [symbolTable, setSymbolTable] = useState(null);
+  const [symbolTableLoading, setSymbolTableLoading] = useState(false);
+  const [symbolTableError, setSymbolTableError] = useState(null);
+  const [symbolTableTab, setSymbolTableTab] = useState(0);
 
   const theme = useTheme();
 
@@ -507,9 +520,27 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
       });
   };
   
+  // Function to fetch and display the Symbol Table
   const handleShowSymbolTable = () => {
-    // This will be implemented later when the semantic analyzer is provided
-    setSymbolTableDialogOpen(true);
+    setSymbolTableLoading(true);
+    setSymbolTableError(null);
+    
+    axios.post('http://localhost:5000/getSymbolTable', { code })
+      .then((response) => {
+        const data = response.data;
+        if (data.success) {
+          setSymbolTable(data.symbols);
+          setSymbolTableDialogOpen(true);
+        } else {
+          setSymbolTableError(data.error || 'Failed to generate symbol table');
+        }
+        setSymbolTableLoading(false);
+      })
+      .catch((error) => {
+        console.error('Error fetching symbol table:', error);
+        setSymbolTableError('Error connecting to server: ' + error.message);
+        setSymbolTableLoading(false);
+      });
   };
   
   // Helper function to render the AST tree (recursive)
@@ -1202,7 +1233,7 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
         </DialogActions>
       </Dialog>
 
-      {/* Symbol Table Dialog (placeholder for now) */}
+      {/* Symbol Table Dialog */}
       <Dialog
         open={symbolTableDialogOpen}
         onClose={() => setSymbolTableDialogOpen(false)}
@@ -1245,23 +1276,197 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
             p: 3
           }}
         >
-          <Box 
-            sx={{ 
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              p: 4
-            }}
-          >
-            <TableViewIcon sx={{ fontSize: '3rem', color: 'text.secondary', mb: 2 }} />
-            <Typography variant="h6" sx={{ mb: 1 }}>
-              Symbol Table Coming Soon
-            </Typography>
-            <Typography variant="body2" align="center" color="text.secondary">
-              This feature will be implemented when the semantic analyzer is provided.
-            </Typography>
-          </Box>
+          {symbolTableError ? (
+            <Box sx={{ color: 'error.main', p: 2 }}>
+              <Typography variant="subtitle1" fontWeight="bold">Error</Typography>
+              <Typography variant="body2">{symbolTableError}</Typography>
+            </Box>
+          ) : symbolTableLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+              <CircularProgress />
+            </Box>
+          ) : !symbolTable ? (
+            <Box 
+              sx={{ 
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                p: 4
+              }}
+            >
+              <TableViewIcon sx={{ fontSize: '3rem', color: 'text.secondary', mb: 2 }} />
+              <Typography variant="h6" sx={{ mb: 1 }}>
+                No Symbol Table Data Available
+              </Typography>
+              <Typography variant="body2" align="center" color="text.secondary">
+                Click the "Show Symbol Table" button to generate the symbol table.
+              </Typography>
+            </Box>
+          ) : (
+            <Box>
+              {/* Filter Tabs */}
+              <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+                <Tabs 
+                  value={symbolTableTab || 0} 
+                  onChange={(e, newValue) => setSymbolTableTab(newValue)}
+                  sx={{ mb: 1 }}
+                >
+                  <Tab label="All Symbols" />
+                  <Tab label="Variables" />
+                  <Tab label="Functions" />
+                  <Tab label="Parameters" />
+                </Tabs>
+              </Box>
+              
+              {/* Symbol Table */}
+              <TableContainer 
+                component={Paper} 
+                sx={{ 
+                  maxHeight: '50vh',
+                  '&::-webkit-scrollbar': { width: '10px' },
+                  '&::-webkit-scrollbar-track': { 
+                    background: theme.palette.mode === 'dark' ? '#2e2e2e' : '#eaeaea', 
+                    borderRadius: '4px' 
+                  },
+                  '&::-webkit-scrollbar-thumb': {
+                    backgroundColor: theme.palette.mode === 'dark' ? '#555' : '#aaa',
+                    borderRadius: '10px',
+                    border: `2px solid ${theme.palette.mode === 'dark' ? '#2e2e2e' : '#eaeaea'}`,
+                  }
+                }}
+              >
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.mode === 'dark' ? '#333' : '#f1f1f1' }}>Name</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.mode === 'dark' ? '#333' : '#f1f1f1' }}>Kind</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.mode === 'dark' ? '#333' : '#f1f1f1' }}>Scope</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.mode === 'dark' ? '#333' : '#f1f1f1' }}>Line:Col</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {symbolTable
+                      .filter(symbol => {
+                        // Remove built-in functions from all views
+                        if (symbol.scope === 'builtin') return false;
+                        
+                        // Convert parameters into their own category
+                        const symbolKind = symbol.isParameter ? 'parameter' : symbol.kind;
+                        
+                        // Filter based on active tab
+                        if (symbolTableTab === 0) return true; // All symbols
+                        if (symbolTableTab === 1) return symbolKind === 'variable'; // Variables only
+                        if (symbolTableTab === 2) return symbolKind === 'function'; // User functions only
+                        if (symbolTableTab === 3) return symbolKind === 'parameter'; // Parameters only
+                        return true;
+                      })
+                      .map((symbol, index) => {
+                        // Determine the actual kind to display (parameter or original kind)
+                        const displayKind = symbol.isParameter ? 'parameter' : symbol.kind;
+                        
+                        return (
+                          <TableRow 
+                            key={index}
+                            sx={{
+                              '&:nth-of-type(odd)': {
+                                backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.02)',
+                              },
+                              '&:hover': {
+                                backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)',
+                              }
+                            }}
+                          >
+                            <TableCell>
+                              <Typography 
+                                variant="body2" 
+                                sx={{ 
+                                  fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
+                                  fontWeight: displayKind === 'function' ? 'bold' : 'normal',
+                                  color: displayKind === 'function' ? 
+                                    (theme.palette.mode === 'dark' ? '#4fc3f7' : '#0277bd') : 
+                                    theme.palette.text.primary
+                                }}
+                              >
+                                {symbol.name}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Chip 
+                                label={displayKind} 
+                                size="small"
+                                sx={{ 
+                                  backgroundColor: 
+                                    displayKind === 'function' ? 
+                                      (theme.palette.mode === 'dark' ? 'rgba(33, 150, 243, 0.2)' : 'rgba(33, 150, 243, 0.1)') :
+                                    displayKind === 'parameter' ?
+                                      (theme.palette.mode === 'dark' ? 'rgba(255, 193, 7, 0.2)' : 'rgba(255, 193, 7, 0.1)') :
+                                      (theme.palette.mode === 'dark' ? 'rgba(76, 175, 80, 0.2)' : 'rgba(76, 175, 80, 0.1)'),
+                                  color: 
+                                    displayKind === 'function' ? 
+                                      (theme.palette.mode === 'dark' ? '#42a5f5' : '#1565c0') :
+                                    displayKind === 'parameter' ?
+                                      (theme.palette.mode === 'dark' ? '#ffb300' : '#ff8f00') :
+                                      (theme.palette.mode === 'dark' ? '#66bb6a' : '#2e7d32'),
+                                  height: '22px',
+                                  '& .MuiChip-label': {
+                                    fontSize: '0.7rem',
+                                    px: 1
+                                  }
+                                }}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Chip 
+                                label={symbol.scope} 
+                                size="small"
+                                sx={{ 
+                                  backgroundColor: 
+                                    symbol.scope.startsWith('local:') ? 
+                                      (theme.palette.mode === 'dark' ? 'rgba(156, 39, 176, 0.2)' : 'rgba(156, 39, 176, 0.1)') :
+                                      (theme.palette.mode === 'dark' ? 'rgba(0, 137, 123, 0.2)' : 'rgba(0, 137, 123, 0.1)'),
+                                  color:
+                                    symbol.scope.startsWith('local:') ? 
+                                      (theme.palette.mode === 'dark' ? '#ba68c8' : '#6a1b9a') :
+                                      (theme.palette.mode === 'dark' ? '#26a69a' : '#00695c'),
+                                  height: '22px',
+                                  '& .MuiChip-label': {
+                                    fontSize: '0.7rem',
+                                    px: 1
+                                  }
+                                }}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              {symbol.line && symbol.column ? (
+                                <Typography 
+                                  variant="body2"
+                                  sx={{ 
+                                    fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
+                                    fontSize: '0.8rem',
+                                    color: theme.palette.text.secondary
+                                  }}
+                                >
+                                  {`${symbol.line}:${symbol.column}`}
+                                </Typography>
+                              ) : (
+                                '—'
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              
+              {symbolTable.filter(symbol => symbol.scope !== 'builtin').length === 0 && (
+                <Box sx={{ p: 3, textAlign: 'center' }}>
+                  <Typography color="text.secondary">No symbols found in the code.</Typography>
+                </Box>
+              )}
+            </Box>
+          )}
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
           <Button 

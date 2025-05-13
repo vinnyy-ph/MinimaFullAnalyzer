@@ -23,8 +23,19 @@ class SemanticAnalyzer(Visitor):
         self.function_throw_expressions = {}  
         self.loop_stack = []  
         self.builtin_functions = MinimaBultins.get_builtin_metadata()
+        # Add tracking for function scopes
+        self.function_scopes = {}
     def push_scope(self):
-        self.current_scope = SymbolTable(parent=self.current_scope)
+        new_scope = SymbolTable(parent=self.current_scope)
+        self.current_scope = new_scope
+        
+        # Track scopes created within functions
+        if self.current_function:
+            if self.current_function not in self.function_scopes:
+                self.function_scopes[self.current_function] = []
+            self.function_scopes[self.current_function].append(new_scope)
+        
+        return new_scope
     def pop_scope(self):
         if self.current_scope.parent:
             self.current_scope = self.current_scope.parent
@@ -1444,13 +1455,26 @@ class SemanticAnalyzer(Visitor):
         self.has_return = False 
         self.function_returns[func_name] = ("empty", None) 
         self.function_throw_expressions.pop(func_name, None) 
-        self.push_scope()
+        
+        # Create a new scope for the function
+        function_scope = self.push_scope()
+        
+        # Store the function scope for parameter tracking
+        if func_name not in self.function_scopes:
+            self.function_scopes[func_name] = []
+        if function_scope not in self.function_scopes[func_name]:
+            self.function_scopes[func_name].append(function_scope)
+            
+        # Define parameters in the function's scope
         for param_name in params:
-            self.current_scope.define_variable(param_name, fixed=False)
-            self.current_scope.variables[param_name].value = ("parameter", None) 
+            self.current_scope.define_variable(param_name, fixed=False, line=line, column=column)
+            self.current_scope.variables[param_name].value = ("parameter", None)
+            self.current_scope.variables[param_name].is_parameter = True
+            
         function_body = node.children[6]
         self.visit(function_body)
         self.pop_scope()
+        
         if not self.has_return:
             print(f"Function '{func_name}' has no throw statement. Assumed to return empty.")
             self.function_returns[func_name] = ("empty", None)
@@ -1462,7 +1486,7 @@ class SemanticAnalyzer(Visitor):
              self.function_returns[func_name] = ("unknown", None)
         self.current_function = outer_function
         self.has_return = outer_has_return
-        return 
+        return
     def visit_function_prog(self, node):
         """
         Visits the function body (a block of statements inside the function).

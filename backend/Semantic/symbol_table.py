@@ -13,6 +13,7 @@ class Symbol:
         self.line = line
         self.column = column
         self.var_type = var_type
+        self.is_parameter = False
 
 class SymbolTable:
     def __init__(self, parent=None):
