@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Table, 
   TableBody, 
@@ -9,13 +9,30 @@ import {
   Paper, 
   Box, 
   Typography, 
-  useTheme 
+  useTheme,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  IconButton
 } from '@mui/material';
+import CodeIcon from '@mui/icons-material/Code';
+import CloseIcon from '@mui/icons-material/Close';
 
 const OutputTable = ({ tokens }) => {
   // Remove any INVALID tokens but keep ALL other tokens
   const validTokens = tokens.filter(token => token.type !== 'INVALID');
   const theme = useTheme();
+  const [rawViewOpen, setRawViewOpen] = useState(false);
+
+  const handleOpenRawView = () => {
+    setRawViewOpen(true);
+  };
+
+  const handleCloseRawView = () => {
+    setRawViewOpen(false);
+  };
 
   return (
     <Box sx={{ 
@@ -196,11 +213,101 @@ const OutputTable = ({ tokens }) => {
             </Table>
           </TableContainer>
           
-          <Box sx={{ mt: 1, px: 1 }}>
+          <Box sx={{ mt: 1, px: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography variant="body2" color="text.secondary">
               Total tokens: {validTokens.length}
             </Typography>
+            <Button 
+              variant="outlined" 
+              size="small"
+              startIcon={<CodeIcon />}
+              onClick={handleOpenRawView}
+              disabled={validTokens.length === 0}
+              sx={{ 
+                textTransform: 'none',
+                borderColor: theme.palette.primary.main,
+                color: theme.palette.primary.main,
+                '&:hover': {
+                  backgroundColor: theme.palette.primary.main + '1A',  // 10% opacity
+                }
+              }}
+            >
+              Show Raw Token Output
+            </Button>
           </Box>
+
+          {/* Raw Token Output Dialog */}
+          <Dialog
+            open={rawViewOpen}
+            onClose={handleCloseRawView}
+            maxWidth="md"
+            fullWidth
+            PaperProps={{
+              sx: {
+                backgroundColor: theme.palette.background.paper,
+                borderRadius: 2,
+                boxShadow: 24,
+              }
+            }}
+          >
+            <DialogTitle sx={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              borderBottom: `1px solid ${theme.palette.divider}`,
+              pb: 1
+            }}>
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <CodeIcon sx={{ mr: 1, color: theme.palette.primary.main }} />
+                <Typography variant="h6" component="div">
+                  Raw Lexical Token Stream
+                </Typography>
+              </Box>
+              <IconButton
+                edge="end"
+                color="inherit"
+                onClick={handleCloseRawView}
+                aria-label="close"
+              >
+                <CloseIcon />
+              </IconButton>
+            </DialogTitle>
+            <DialogContent 
+              dividers 
+              sx={{ 
+                backgroundColor: theme.palette.mode === 'dark' ? '#1a1a1a' : '#f5f5f5',
+                p: 3
+              }}
+            >
+              <Box 
+                component="pre" 
+                sx={{ 
+                  margin: 0, 
+                  whiteSpace: 'pre-wrap',
+                  fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
+                  fontSize: '0.85rem',
+                  overflow: 'auto',
+                  maxHeight: '60vh',
+                  color: theme.palette.text.primary,
+                  backgroundColor: theme.palette.mode === 'dark' ? '#121212' : '#ffffff',
+                  padding: 2,
+                  borderRadius: 1,
+                  border: `1px solid ${theme.palette.divider}`
+                }}
+              >
+                {JSON.stringify(validTokens, null, 2)}
+              </Box>
+            </DialogContent>
+            <DialogActions sx={{ p: 2 }}>
+              <Button 
+                onClick={handleCloseRawView} 
+                variant="contained"
+                color="primary"
+              >
+                Close
+              </Button>
+            </DialogActions>
+          </Dialog>
         </Box>
       )}
     </Box>
