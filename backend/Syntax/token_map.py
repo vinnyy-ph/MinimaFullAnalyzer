@@ -26,7 +26,7 @@ TOKEN_MAP = {
     "CHECKIF": "checkif",
     "RECHECK": "recheck",
     "OTHERWISE": "otherwise",
-    "SWITCH": "switch",
+    "MATCH": "match",
     "CASE": "case",
     "DEFAULT": "default",
     "EXIT": "exit",
