@@ -14,6 +14,7 @@ class TACGenerator(Visitor):
         self.variable_types = {}
         self.values = {}
         self.debug_mode = debug_mode
+        self.expression_depth = 0  # Track expression nesting depth
     def push_loop(self, start_label, end_label):
         """Push a new loop context onto the stack."""
         self.loop_stack.append((start_label, end_label))
@@ -122,6 +123,28 @@ class TACGenerator(Visitor):
             if hasattr(tree, "type"):
                 return self.visit_token(tree)
             return None
+        
+        # Check for direct parenthesized expressions at any level
+        if tree.data == "primary_expr" and len(tree.children) > 1:
+            if (hasattr(tree.children[0], "type") and tree.children[0].type == "LPAREN" and
+                hasattr(tree.children[-1], "type") and tree.children[-1].type == "RPAREN"):
+                # This is a parenthesized expression, prioritize it
+                if self.debug_mode:
+                    print(f"Prioritizing parenthesized expression: {tree.data}")
+                method_name = f"visit_{tree.data}"
+                method = getattr(self, method_name)
+                return method(tree)
+        
+        # Check for expressions with parenthesized sub-expressions
+        if tree.data in ("add_expr", "mul_expr", "expression"):
+            # Look for parenthesized expressions within this expression
+            for child in tree.children:
+                if hasattr(child, "data") and child.data == "primary_expr":
+                    if (len(child.children) > 1 and 
+                        hasattr(child.children[0], "type") and child.children[0].type == "LPAREN"):
+                        # Found a parenthesized expression within this node
+                        if self.debug_mode:
+                            print(f"Found parenthesized subexpression in {tree.data}")
         
         method_name = f"visit_{tree.data}"
         if hasattr(self, method_name):
@@ -397,7 +420,19 @@ class TACGenerator(Visitor):
                                     prompt = str(prompt_expr[1])
                     temp = self.get_temp()
                     self.emit('INPUT', prompt, None, temp)
-                    return ('text', temp)  
+                    return ('text', temp)
+        
+        # Look for parenthesized expressions and prioritize them
+        for i, child in enumerate(node.children):
+            if hasattr(child, 'data') and child.data == 'primary_expr':
+                if len(child.children) > 1 and hasattr(child.children[0], 'type') and child.children[0].type == 'LPAREN':
+                    # This is a parenthesized expression, process it first
+                    if self.debug_mode:
+                        print(f"Prioritizing parenthesized expression in expression node")
+                    
+                    # Visit all children, but prioritize the parenthesized expression
+                    result = self.visit(node.children[0])
+                    return result
         
         # Process the expression following precedence rules by visiting the first child,
         # which will be the highest-precedence expression according to the grammar hierarchy
@@ -473,18 +508,40 @@ class TACGenerator(Visitor):
         so multiplication/division will be processed before addition/subtraction.
         """
         children = node.children
-        left = self.visit(children[0])  # Visit left operand first (should be multiplication expression)
         source_pos = self.get_source_position(node)
+        
+        # First, look for and process any parenthesized expressions
+        for i, child in enumerate(children):
+            if i % 2 == 1:  # Skip operators
+                continue
+                
+            if hasattr(child, 'data') and child.data == 'primary_expr':
+                if len(child.children) > 1 and hasattr(child.children[0], 'type') and child.children[0].type == 'LPAREN':
+                    # Prioritize evaluating this parenthesized expression
+                    if self.debug_mode:
+                        print(f"Prioritizing parenthesized expression in add_expr")
+                    self.enter_expression()
+                    self.visit(child)
+                    self.exit_expression()
+        
+        # Now process the regular expression from left to right with precedence
+        left = self.visit(children[0])  # Visit left operand first (should be multiplication expression)
         
         i = 1
         while i < len(children):
             op = children[i].value  
             right = self.visit(children[i+1])  # Visit right operand
+            
+            # Create a temporary for this operation
             temp = self.get_temp()
+            
+            # Resolve operands, ensuring temporaries from parenthesized expressions are used directly
             left_operand = left[1] if isinstance(left, tuple) else left
             right_operand = right[1] if isinstance(right, tuple) else right
+            
             left_type = left[0] if isinstance(left, tuple) else self.get_type(left)
             right_type = right[0] if isinstance(right, tuple) else self.get_type(right)
+            
             if op == "+":
                 if left_type == "list" or right_type == "list":
                     self.emit('ADD', left_operand, right_operand, temp, 
@@ -512,8 +569,10 @@ class TACGenerator(Visitor):
                         self.variable_types[temp] = "point"
                     else:
                         self.variable_types[temp] = "integer"
+            
             left = temp
             i += 2
+            
         return left
     def visit_mul_expr(self, node):
         """
@@ -521,20 +580,41 @@ class TACGenerator(Visitor):
         so these expressions are evaluated before addition/subtraction.
         """
         children = node.children
+        source_pos = self.get_source_position(node)
+        
+        # First, look for and process any parenthesized expressions
+        for i, child in enumerate(children):
+            if i % 2 == 1:  # Skip operators
+                continue
+                
+            if hasattr(child, 'data') and child.data == 'primary_expr':
+                if len(child.children) > 1 and hasattr(child.children[0], 'type') and child.children[0].type == 'LPAREN':
+                    # Prioritize evaluating this parenthesized expression
+                    if self.debug_mode:
+                        print(f"Prioritizing parenthesized expression in mul_expr")
+                    self.enter_expression()
+                    self.visit(child)
+                    self.exit_expression()
+        
         # Visit the leftmost operand first (which could be a primary expression)
         left = self.visit(children[0])
-        source_pos = self.get_source_position(node)
         
         i = 1
         while i < len(children):
             op = children[i].value
             # Visit each right operand (which could be primary expressions)
             right = self.visit(children[i+1])
+            
+            # Create a temporary for this operation
             temp = self.get_temp()
+            
+            # Resolve operands, ensuring temporaries from parenthesized expressions are used directly
             left_operand = left[1] if isinstance(left, tuple) else left
             right_operand = right[1] if isinstance(right, tuple) else right
+            
             left_type = left[0] if isinstance(left, tuple) else self.get_type(left)
             right_type = right[0] if isinstance(right, tuple) else self.get_type(right)
+            
             if left_type == "text" or right_type == "text":
                 self.emit('ERROR', f"Cannot use {op} with text", None, temp,
                          *(source_pos if source_pos else (None, None)))
@@ -549,13 +629,16 @@ class TACGenerator(Visitor):
                 else:  
                     self.emit('MOD', left_operand, right_operand, temp,
                              *(source_pos if source_pos else (None, None)))
+                
                 if op != "/" and (left_type == "point" or right_type == "point" or 
                                 left_type == "float" or right_type == "float"):
                     self.variable_types[temp] = "point"
                 elif op != "/":
                     self.variable_types[temp] = "integer"
+            
             left = temp
             i += 2
+            
         return left
     def visit_pre_expr(self, node):
         children = node.children
@@ -589,20 +672,38 @@ class TACGenerator(Visitor):
             if self.debug_mode:
                 print(f"Processing parenthesized expression at depth {getattr(node, 'depth', 'unknown')}")
             
-            # First, evaluate the inner expression
+            # Track entry into parenthesized expression
+            depth = self.enter_expression()
+            if self.debug_mode:
+                print(f"Entered parenthesized expression at depth {depth}")
+            
+            # Get source position for error tracking
+            source_pos = self.get_source_position(node)
+            
+            # First, evaluate the inner expression and ensure a temporary is created
+            # to make the parenthesized computation explicit in the TAC output
             expr_result = self.visit(node.children[1])
             
-            # For complex expressions, we might want to create a new temporary variable
-            # to make the parenthesized nature of the expression clearer in the TAC
-            if isinstance(expr_result, str) and expr_result.startswith('t'):
-                # Already a temporary, no need for another level of indirection
-                return expr_result
-            else:
-                # Create a new temporary to emphasize the parenthesized computation
-                temp = self.get_temp()
-                value = expr_result[1] if isinstance(expr_result, tuple) else expr_result
-                self.emit('ASSIGN', value, None, temp)
-                return temp
+            # Exit from parenthesized expression
+            self.exit_expression()
+            
+            # Always create a new temporary for parenthesized expressions
+            # to ensure they are evaluated completely before being used
+            temp = self.get_temp()
+            value = expr_result[1] if isinstance(expr_result, tuple) else expr_result
+            self.emit('ASSIGN', value, None, temp, 
+                     *(source_pos if source_pos else (None, None)))
+            
+            # Ensure this temporary has proper type information
+            if isinstance(expr_result, tuple) and expr_result[0] in ('integer', 'float', 'point', 'bool', 'text'):
+                self.variable_types[temp] = expr_result[0]
+            elif isinstance(expr_result, str) and expr_result in self.variable_types:
+                self.variable_types[temp] = self.variable_types[expr_result]
+                
+            if self.debug_mode:
+                print(f"Exited parenthesized expression, created temporary {temp}")
+                
+            return temp
     def visit_operand(self, node):
         if (hasattr(node.children[0], 'type') and node.children[0].type == 'GET' and
                 len(node.children) >= 4 and  
@@ -932,11 +1033,25 @@ class TACGenerator(Visitor):
         Structure: SHOW LPAREN expression RPAREN
         """
         source_pos = self.get_source_position(node)
-        expr = self.visit(node.children[2])
+        
+        # Process the expression inside the show statement with special handling for parentheses
+        if hasattr(node.children[2], 'data') and node.children[2].data == 'primary_expr':
+            # Direct access to primary_expr in show() statement - handle special case for parentheses
+            if len(node.children[2].children) > 1 and hasattr(node.children[2].children[0], 'type') and node.children[2].children[0].type == 'LPAREN':
+                # This is a parenthesized expression, ensure it's evaluated first
+                self.enter_expression()
+                expr = self.visit(node.children[2])
+                self.exit_expression()
+            else:
+                expr = self.visit(node.children[2])
+        else:
+            expr = self.visit(node.children[2])
+        
         if isinstance(expr, str) and expr.startswith('t'):
             val = expr
         else:
             val = expr[1] if isinstance(expr, tuple) and len(expr) >= 2 else expr
+        
         self.emit('PRINT', val, None, None, 
                  *(source_pos if source_pos else (None, None)))
         return None
@@ -1491,3 +1606,18 @@ class TACGenerator(Visitor):
         if line is not None:
             return (line, column if column is not None else 0)
         return None
+
+    def enter_expression(self):
+        """Track entry into a nested expression (like parentheses)"""
+        self.expression_depth += 1
+        return self.expression_depth
+        
+    def exit_expression(self):
+        """Track exit from a nested expression"""
+        if self.expression_depth > 0:
+            self.expression_depth -= 1
+        return self.expression_depth
+        
+    def get_current_expression_depth(self):
+        """Get the current nesting level of expressions"""
+        return self.expression_depth

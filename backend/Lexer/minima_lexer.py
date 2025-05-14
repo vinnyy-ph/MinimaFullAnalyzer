@@ -562,9 +562,9 @@ class Lexer:
         return T('COMMENT', comment_value, start_line, start_column)
 
     def handle_state_reading_identifier(self, start_line, start_column):
-        # Check if the first character is valid (must be lowercase)
-        if self.current_char not in ATOMS['alphabet'] or not self.current_char.islower():
-            error_msg = f"Invalid identifier start: '{self.current_char}' - identifiers must start with lowercase letter"
+        # Check if the first character is valid (allow uppercase for YES and NO)
+        if self.current_char not in ATOMS['alphabet']:
+            error_msg = f"Invalid identifier start: '{self.current_char}' - identifiers must start with a letter"
             error = InvalidIdentifierError(self.current_char, self.line, self.column, error_msg)
             self.errors.append(error)
             invalid_char = self.current_char
@@ -587,9 +587,32 @@ class Lexer:
                 self.advance()
             else:
                 break
-    
-        # Check if the gathered value is a keyword
-        token_type = self.keyword_check(value)
+
+        # Special check for YES and NO literals before keyword check
+        if value == "YES" or value == "NO":
+            if self.current_char is not None:
+                valid_delims = valid_delimiters_keywords_dict.get('STATELITERAL', [])
+                two_char = self.current_char
+                if self.peek_next_char():
+                    two_char += self.peek_next_char()
+                
+                # Delimiter check after state literal
+                if self.current_char not in valid_delims and two_char not in valid_delims:
+                    msg = f"Invalid delimiter after state literal '{value}': '{self.current_char}'"
+                    error = InvalidSymbolError(self.current_char, self.line, self.column)
+                    error.message = msg
+                    self.errors.append(error)
+                    self.current_state = LexerState.INITIAL
+                    return self.get_next_token()
+            
+            self.current_state = LexerState.INITIAL
+            return T('STATELITERAL', value, start_line, start_column)
+
+        # Check if the gathered value is a keyword (but only for lowercase starting identifiers)
+        token_type = None
+        if value[0].islower():
+            token_type = self.keyword_check(value)
+        
         if token_type:
             # -- It's a keyword --
             if self.current_char is not None:
@@ -606,11 +629,20 @@ class Lexer:
                     self.errors.append(error)
                     self.current_state = LexerState.INITIAL
                     return self.get_next_token()
-    
+
             self.current_state = LexerState.INITIAL
             return T(token_type, value, start_line, start_column)
-    
+
         else:
+            # Not a keyword, check for identifiers
+            # Regular identifiers must start with lowercase
+            if not value[0].islower():
+                error_msg = f"Invalid identifier '{value}' - identifiers must start with lowercase letter"
+                error = InvalidIdentifierError(value, start_line, start_column, error_msg)
+                self.errors.append(error)
+                self.current_state = LexerState.INITIAL
+                return T('INVALID', value, start_line, start_column, error=error_msg)
+            
             # The identifier is not a keyword, check for length errors
             if len(value) > 20:
                 error_msg = f"Identifier '{value}' exceeds maximum length of 20 characters"
@@ -619,7 +651,7 @@ class Lexer:
                 # Return the identifier with an error instead of skipping it
                 self.current_state = LexerState.INITIAL
                 return T('INVALID', value, start_line, start_column, error=error_msg)
-    
+
             # Check delimiter for a valid identifier
             if self.current_char is not None:
                 two_char = self.current_char
@@ -635,7 +667,7 @@ class Lexer:
                     self.advance()
                     self.current_state = LexerState.INITIAL
                     return self.get_next_token()
-    
+
             # We have a valid identifier and a valid delimiter.
             identifier_label = self.get_identifier_label(value)
             self.current_state = LexerState.INITIAL
