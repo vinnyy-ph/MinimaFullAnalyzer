@@ -1,7 +1,7 @@
 import re
 from lark import Visitor
 from .symbol_table import SymbolTable
-from .semantic_errors import InvalidListOperandError, ListIndexOutOfRangeError, SemanticError, FunctionRedefinedError, ParameterMismatchError, FunctionNotDefinedError, UndefinedIdentifierError, RedeclarationError, FixedVarReassignmentError, ControlFlowError, TypeMismatchError, UnreachableCodeError, InvalidListAccessError, InvalidGroupAccessError
+from .semantic_errors import InvalidListOperandError, ListIndexOutOfRangeError, SemanticError, FunctionRedefinedError, ParameterMismatchError, FunctionNotDefinedError, UndefinedIdentifierError, RedeclarationError, FixedVarReassignmentError, ControlFlowError, TypeMismatchError, UnreachableCodeError, InvalidListAccessError, InvalidGroupAccessError, NegationError, BuiltinFunctionWithoutParensError
 from ..CodegenTAC.built_in_functions import MinimaBultins
 def convert_state_to_int(state):
     return 1 if state == "YES" else 0
@@ -23,6 +23,10 @@ class SemanticAnalyzer(Visitor):
         self.function_throw_expressions = {}  
         self.loop_stack = []  
         self.builtin_functions = MinimaBultins.get_builtin_metadata()
+        
+        # Print the registered built-in functions for debugging
+        print(f"Registered built-in functions: {list(self.builtin_functions.keys())}")
+        
         # Add tracking for function scopes
         self.function_scopes = {}
     def push_scope(self):
@@ -432,6 +436,27 @@ class SemanticAnalyzer(Visitor):
         Visit an expression node and check for list or group access patterns.
         This catches expressions like 'a[1]' and validates them.
         """
+        # Check if the expression directly contains a built-in function name
+        if (len(node.children) > 0 and 
+            hasattr(node.children[0], "children") and len(node.children[0].children) > 0 and
+            hasattr(node.children[0].children[0], "type") and 
+            node.children[0].children[0].type == "IDENTIFIER" and
+            node.children[0].children[0].value in self.builtin_functions):
+            
+            func_name = node.children[0].children[0].value
+            line = node.children[0].children[0].line
+            column = node.children[0].children[0].column
+            
+            # Check if it's not being used as a function call
+            has_func_call = False
+            if (len(node.children[0].children) > 1 and 
+                hasattr(node.children[0].children[1], "data") and 
+                node.children[0].children[1].data == "func_call"):
+                has_func_call = True
+                
+            if not has_func_call:
+                self.errors.append(BuiltinFunctionWithoutParensError(func_name, line, column))
+        
         result = self.get_value(node.children[0])
         self.values[id(node)] = result
         if result and isinstance(result, tuple) and len(result) > 0:
@@ -610,16 +635,32 @@ class SemanticAnalyzer(Visitor):
                 result = ("state", "YES" if result_bool else "NO")
             elif op_token.value == "-":
                 typ, val = expr if isinstance(expr, tuple) and len(expr) >= 2 else ("unknown", None)
-                if val is None:
+                
+                # Check if the type is a compound type (using the | separator)
+                if typ and "|" in str(typ):
+                    type_options = typ.split("|")
+                    # Check if all possible types are numeric
+                    if all(t in ["integer", "point"] for t in type_options):
+                        # Since all options are numeric, negation is valid
+                        result = (typ, -val if val is not None else None)
+                    else:
+                        # Not all types are numeric, report error
+                        line = op_token.line if hasattr(op_token, 'line') else 0
+                        column = op_token.column if hasattr(op_token, 'column') else 0
+                        self.errors.append(NegationError(typ, line, column))
+                        result = ("unknown", None)
+                elif val is None:
                     result = ("unknown", None)
                 elif typ == "state":
                     result = ("integer", -convert_state_to_int(val))
+                elif typ in ["integer", "point"]:
+                    result = (typ, -val)
                 else:
-                    try:
-                        result = (typ, -val)
-                    except:
-                        # If we can't negate the value, return an unknown type
-                        result = ("unknown", None)
+                    # Report error for non-numeric types
+                    line = op_token.line if hasattr(op_token, 'line') else 0
+                    column = op_token.column if hasattr(op_token, 'column') else 0
+                    self.errors.append(NegationError(typ, line, column))
+                    result = ("unknown", None)
         self.values[id(node)] = result
         return result
     def visit_primary_expr(self, node):
@@ -631,7 +672,21 @@ class SemanticAnalyzer(Visitor):
         self.values[id(node)] = result
         return result
     def visit_operand(self, node):
-        result = self.get_value(node.children[0])
+        # Check if this is a direct built-in function reference
+        if (hasattr(node.children[0], 'type') and 
+            node.children[0].type == 'IDENTIFIER' and 
+            node.children[0].value in self.builtin_functions):
+            
+            func_name = node.children[0].value
+            line = node.children[0].line if hasattr(node.children[0], 'line') else 0
+            column = node.children[0].column if hasattr(node.children[0], 'column') else 0
+            
+            # Add error for using built-in function without parentheses
+            self.errors.append(BuiltinFunctionWithoutParensError(func_name, line, column))
+            result = ("unknown", None)
+        else:
+            result = self.get_value(node.children[0])
+            
         self.values[id(node)] = result
         return result
     def visit_typecast_expression(self, node):
@@ -706,6 +761,26 @@ class SemanticAnalyzer(Visitor):
             self.errors.append(RedeclarationError(name, line, column))
             return
         if len(children) >= 3 and children[2] and not (hasattr(children[2], "type") and children[2].type == "SEMICOLON"):
+            # Check if we might be using a built-in function name directly
+            if (hasattr(children[2], "children") and len(children[2].children) > 0 and
+                hasattr(children[2].children[0], "type") and 
+                children[2].children[0].type == "IDENTIFIER" and
+                children[2].children[0].value in self.builtin_functions):
+                
+                func_name = children[2].children[0].value
+                line = children[2].children[0].line
+                column = children[2].children[0].column
+                
+                # Check it's not used as a function call
+                has_func_call = False
+                if (len(children[2].children) > 1 and 
+                    hasattr(children[2].children[1], "data") and 
+                    children[2].children[1].data == "func_call"):
+                    has_func_call = True
+                
+                if not has_func_call:
+                    self.errors.append(BuiltinFunctionWithoutParensError(func_name, line, column))
+            
             literal_node = self.extract_literal(children[2])
             if literal_node is not None:
                 expr_value = self.get_value(literal_node)
@@ -830,6 +905,26 @@ class SemanticAnalyzer(Visitor):
             self.errors.append(RedeclarationError(name, line, column))
             return
         if len(children) > 3 and children[3]:
+            # Check if we might be using a built-in function name directly
+            if (hasattr(children[3], "children") and len(children[3].children) > 0 and
+                hasattr(children[3].children[0], "type") and 
+                children[3].children[0].type == "IDENTIFIER" and
+                children[3].children[0].value in self.builtin_functions):
+                
+                func_name = children[3].children[0].value
+                line = children[3].children[0].line
+                column = children[3].children[0].column
+                
+                # Check it's not used as a function call
+                has_func_call = False
+                if (len(children[3].children) > 1 and 
+                    hasattr(children[3].children[1], "data") and 
+                    children[3].children[1].data == "func_call"):
+                    has_func_call = True
+                
+                if not has_func_call:
+                    self.errors.append(BuiltinFunctionWithoutParensError(func_name, line, column))
+            
             literal_node = self.extract_literal(children[3])
             if literal_node is not None:
                 expr_value = self.get_value(literal_node)
@@ -953,6 +1048,25 @@ class SemanticAnalyzer(Visitor):
         line = ident.line
         column = ident.column
         name = ident.value
+        
+        # Check if we're trying to assign a built-in function name without parentheses 
+        assign_op_node = children[2]
+        if hasattr(assign_op_node, 'data'):
+            op = assign_op_node.children[0].value
+        else:
+            op = assign_op_node.value
+            
+        # If we have something like "a = length" in the rhs
+        if (len(children) > 3 and isinstance(children[3], object) and 
+            hasattr(children[3], 'children') and len(children[3].children) > 0 and
+            hasattr(children[3].children[0], 'type') and children[3].children[0].type == 'IDENTIFIER'):
+            
+            rhs_id = children[3].children[0].value
+            if rhs_id in self.builtin_functions:
+                rhs_line = children[3].children[0].line
+                rhs_column = children[3].children[0].column
+                self.errors.append(BuiltinFunctionWithoutParensError(rhs_id, rhs_line, rhs_column))
+        
         scope, symbol = self.current_scope.find_variable_scope(name)
         if symbol is None:
             self.errors.append(UndefinedIdentifierError(name, line, column))
@@ -960,6 +1074,8 @@ class SemanticAnalyzer(Visitor):
         if symbol.fixed:
             self.errors.append(FixedVarReassignmentError(name, line, column))
             return
+            
+        # Rest of the existing code
         has_accessor = False
         accessor_node = None
         if len(children) > 1 and children[1] and hasattr(children[1], 'children') and children[1].children:
@@ -978,11 +1094,7 @@ class SemanticAnalyzer(Visitor):
                     self.errors.append(InvalidGroupAccessError(
                         name, line, column))
                     return  
-        assign_op_node = children[2]
-        if hasattr(assign_op_node, 'data'):
-            op = assign_op_node.children[0].value
-        else:
-            op = assign_op_node.value
+
         if op != "=" and not has_accessor:
             var_value = getattr(symbol, "value", None)
             if var_value:
@@ -1031,6 +1143,7 @@ class SemanticAnalyzer(Visitor):
                         scope.variables[name].value = new_value
                 print(f"Variable {name} reassigned to expression value {expr_value[1]} and type {expr_value[0]}")
         else:
+            # Rest of the existing code for accessors...
             var_value = getattr(symbol, "value", None)
             if var_value and isinstance(var_value, tuple) and len(var_value) > 1:
                 var_type = var_value[0]
@@ -1129,9 +1242,23 @@ class SemanticAnalyzer(Visitor):
         line = ident.line
         column = ident.column
         name = ident.value
-        if len(children) > 1 and hasattr(children[1], 'data') and children[1].data == "func_call":
+        
+        # Check if this is a function call (has func_call child)
+        has_func_call = len(children) > 1 and hasattr(children[1], 'data') and children[1].data == "func_call"
+        
+        # Check if this is a built-in function name
+        is_builtin = name in self.builtin_functions
+        
+        # If it's a built-in function name but NOT used with parentheses, report specific error
+        if is_builtin and not has_func_call:
+            self.errors.append(BuiltinFunctionWithoutParensError(name, line, column))
+            result = ("unknown", None)
+            self.values[id(node)] = result
+            return result
+        
+        if has_func_call:
             arg_values = self.evaluate_function_args(children[1])
-            if name in self.builtin_functions:
+            if is_builtin:
                 expected = self.builtin_functions[name]['params']
                 provided = len(arg_values)
                 if expected == -1:
@@ -1253,6 +1380,12 @@ class SemanticAnalyzer(Visitor):
                         result_type = "point"
                     elif all(isinstance(item, tuple) and len(item) >= 1 and item[0] == "text" for item in list_vals):
                         result_type = "text"
+            elif arg_values[0][0] == "text":
+                result_type = "text"
+            elif arg_values[0][0] == "integer":
+                result_type = "integer"
+            elif arg_values[0][0] == "point":
+                result_type = "point"
         
         elif func_name == "sorted":
             if arg_values[0][0] not in ["list", "text"]:
@@ -1267,14 +1400,20 @@ class SemanticAnalyzer(Visitor):
                 # Warning only
                 print(f"Warning: reverse() expects list or text but got {arg_values[0][0]}")
             # For reverse, we can be specific about the return type
-            result_type = arg_values[0][0]
+            if arg_values[0][0] == "list":
+                result_type = "list"
+            elif arg_values[0][0] == "text":
+                result_type = "text"
         
         elif func_name == "abs":
             if arg_values[0][0] not in ["integer", "point"]:
                 # Warning only
                 print(f"Warning: abs() expects integer or point but got {arg_values[0][0]}")
             # Return the same type as input
-            result_type = arg_values[0][0]
+            if arg_values[0][0] == "integer":
+                result_type = "integer"
+            elif arg_values[0][0] == "point":
+                result_type = "point"
         
         elif func_name == "sum":
             if arg_values[0][0] not in ["list", "integer", "point"]:
@@ -1292,6 +1431,8 @@ class SemanticAnalyzer(Visitor):
                         result_type = "point"
                     else:
                         result_type = "integer"
+            elif arg_values[0][0] == "integer":
+                result_type = "integer"
         
         elif func_name == "contains":
             if len(arg_values) < 2:
@@ -1322,8 +1463,10 @@ class SemanticAnalyzer(Visitor):
                 print(f"Warning: slice() third argument (end index) should be an integer but got {arg_values[2][0]}")
         
             # The result type is the same as the input collection type
-            if arg_values[0][0] in ["list", "text"]:
-                result_type = arg_values[0][0]
+            if arg_values[0][0] == "list":
+                result_type = "list"
+            elif arg_values[0][0] == "text":
+                result_type = "text"
         
         elif func_name == "unique":
             if arg_values[0][0] not in ["list", "text"]:

@@ -18,6 +18,11 @@ class UndefinedIdentifierError(SemanticError):
         message = f"Undefined identifier '{identifier}'"
         super().__init__(message, line, column)
 
+class BuiltinFunctionWithoutParensError(SemanticError):
+    def __init__(self, function_name, line=None, column=None):
+        message = f"Built-in function '{function_name}' must be called with parentheses"
+        super().__init__(message, line, column)
+
 class RedeclarationError(SemanticError):
     def __init__(self, identifier, line=None, column=None):
         message = f"Variable '{identifier}' is already declared in the current scope"
@@ -57,6 +62,11 @@ class TypeMismatchError(SemanticError):
             message = f"Expected {expected} type in {context}, but got {got}"
         else:
             message = f"Expected {expected} type, but got {got}"
+        super().__init__(message, line, column)
+
+class NegationError(SemanticError):
+    def __init__(self, type_name, line=None, column=None):
+        message = f"Cannot negate value of type '{type_name}' - negation is only valid for numeric types (integer, point)"
         super().__init__(message, line, column)
 
 class UnreachableCodeError(SemanticError):

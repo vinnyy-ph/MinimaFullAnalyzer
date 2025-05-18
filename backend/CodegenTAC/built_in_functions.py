@@ -17,12 +17,12 @@ class MinimaBultins:
         },
         'max': {
             'params': 1,
-            'return_type': 'unknown',
+            'return_type': 'integer|point|text',
             'implementation': lambda interpreter, args: MinimaBultins._max(interpreter, args)
         },
         'min': {
             'params': 1,
-            'return_type': 'unknown',
+            'return_type': 'integer|point|text',
             'implementation': lambda interpreter, args: MinimaBultins._min(interpreter, args)
         },
         'sorted': {
@@ -32,17 +32,17 @@ class MinimaBultins:
         },
         'reverse': {
             'params': 1,
-            'return_type': 'unknown',
+            'return_type': 'list|text',
             'implementation': lambda interpreter, args: MinimaBultins._reverse(interpreter, args)
         },
         'abs': {
             'params': 1,
-            'return_type': 'unknown',
+            'return_type': 'integer|point',
             'implementation': lambda interpreter, args: MinimaBultins._abs(interpreter, args)
         },
         'sum': {
             'params': 1,
-            'return_type': 'unknown',
+            'return_type': 'integer|point',
             'implementation': lambda interpreter, args: MinimaBultins._sum(interpreter, args)
         },
         'contains': {
@@ -57,7 +57,7 @@ class MinimaBultins:
         },
         'slice': {
             'params': 3,
-            'return_type': 'list',
+            'return_type': 'list|text',
             'implementation': lambda interpreter, args: MinimaBultins._slice(interpreter, args)
         },
         'unique': {
@@ -77,7 +77,7 @@ class MinimaBultins:
         },
         'pow': {
             'params': 2,
-            'return_type': 'unknown',
+            'return_type': 'integer|point',
             'implementation': lambda interpreter, args: MinimaBultins._pow(interpreter, args)
         },
         'factorial': {
@@ -97,7 +97,7 @@ class MinimaBultins:
         },
         'round': {
             'params': -1,  
-            'return_type': 'unknown',
+            'return_type': 'integer|point',
             'implementation': lambda interpreter, args: MinimaBultins._round(interpreter, args)
         },
     }

@@ -21,16 +21,12 @@ import TerminalIcon from '@mui/icons-material/Terminal';
 import CodeIcon from '@mui/icons-material/Code';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
-// Create a context for editor reference if it doesn't exist already
-// You may need to create this elsewhere in your app
 // import { EditorContext } from '../context/EditorContext';
 
 const Errors = ({ errors, terminalOutput = '', debugMode }) => {
   const theme = useTheme();
   const boxRef = useRef(null);
   const [tabIndex, setTabIndex] = useState(0);
-  // Uncomment if you have an editor context
-  // const { editorRef } = useContext(EditorContext);
 
   useEffect(() => {
     if (boxRef.current) {
