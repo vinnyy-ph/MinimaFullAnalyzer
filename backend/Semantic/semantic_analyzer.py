@@ -1967,7 +1967,8 @@ class SemanticAnalyzer(Visitor):
                                 elif 0 <= idx < len(list_items):
                                     result = list_items[idx]
                                 else:
-                                    print(f"Permitting potential runtime list access to '{var_name}[{idx}]'")
+                                    self.errors.append(ListIndexOutOfRangeError(
+                                        var_name, idx, line, column))
                                     result = ("unknown", None)
                             else:
                                 self.errors.append(SemanticError(
