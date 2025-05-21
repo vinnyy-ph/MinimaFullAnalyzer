@@ -518,7 +518,7 @@ const Errors = ({ errors, terminalOutput = '', debugMode }) => {
             />
 
             {/* Keep the rest of the original code */}
-            {error.unexpected && (
+            {error.unexpected && !error.isEndOfInput && (
               <Box sx={{ pl: 1, fontSize: '0.85rem' }}>
                 <Typography
                   variant="body2"
@@ -544,6 +544,18 @@ const Errors = ({ errors, terminalOutput = '', debugMode }) => {
                     }}
                   />
                 </Typography>
+                {(error.literals?.length > 0 || error.keywords?.length > 0 || error.symbols?.length > 0 || error.others?.length > 0) && (
+                  <Typography variant="body2" sx={{ color: theme.palette.text.secondary, mt: 0.5 }}>
+                    Expected tokens:
+                  </Typography>
+                )}
+                {renderExpectedCategories(error)}
+              </Box>
+            )}
+
+            {/* Display expected tokens for end of input errors without "unexpected token:" prefix */}
+            {error.isEndOfInput && error.unexpected && (
+              <Box sx={{ pl: 1, fontSize: '0.85rem' }}>
                 {(error.literals?.length > 0 || error.keywords?.length > 0 || error.symbols?.length > 0 || error.others?.length > 0) && (
                   <Typography variant="body2" sx={{ color: theme.palette.text.secondary, mt: 0.5 }}>
                     Expected tokens:

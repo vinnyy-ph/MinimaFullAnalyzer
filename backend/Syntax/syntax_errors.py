@@ -99,20 +99,33 @@ def process_syntax_error(
     all_brackets = set(bracket_pairs.keys()) | set(bracket_pairs.values())
     
     # Get unexpected token information
+    is_end_of_input = False
     if unexpected_token is not None:
         try:
             token_type = unexpected_token.type
             token_value = unexpected_token.value
             mapped_unexpected = TOKEN_MAP.get(token_type, token_value)
+            
+            # Check if token is end of input/EOF
+            if token_type in ['$END', '$EOF'] or mapped_unexpected == "end of input":
+                is_end_of_input = True
         except AttributeError:
             token_value = unexpected_token
             mapped_unexpected = TOKEN_MAP.get(unexpected_token, unexpected_token)
+            
+            # Check if token is end of input/EOF
+            if unexpected_token in ['$END', '$EOF'] or mapped_unexpected == "end of input":
+                is_end_of_input = True
             
         # Check if our unexpected token is a bracket
         if mapped_unexpected in all_brackets:
             unexpected_grammar_error = True
             # Format a clearer error message for unexpected bracket
             final_message = f"Syntax error at line {line}, column {column}: unexpected '{mapped_unexpected}'"
+        elif is_end_of_input:
+            unexpected_grammar_error = True
+            # Special case for end of input - don't call it a token
+            final_message = f"Syntax error at line {line}, column {column}: unexpected end of input"
     else:
         mapped_unexpected = "None"
         token_value = None
@@ -164,6 +177,9 @@ def process_syntax_error(
     # Categorize the filtered tokens for display
     keywords_cat, literals_cat, symbols_cat, others_cat = categorize_tokens(filtered_expected)
     
+    # Set a flag to indicate if this is an end of input error (used by the frontend)
+    is_eof_error = is_end_of_input
+    
     return {
         "message": final_message,
         "rawMessage": error_msg,
@@ -176,5 +192,6 @@ def process_syntax_error(
         "keywords": keywords_cat,
         "literals": literals_cat,
         "symbols": symbols_cat,
-        "others": others_cat
+        "others": others_cat,
+        "isEndOfInput": is_eof_error
     }
