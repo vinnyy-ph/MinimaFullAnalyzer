@@ -18,6 +18,11 @@ class UndefinedIdentifierError(SemanticError):
         message = f"Undefined identifier '{identifier}'"
         super().__init__(message, line, column)
 
+class UninitializedVariableError(SemanticError):
+    def __init__(self, identifier, line=None, column=None):
+        message = f"Variable '{identifier}' is used before being initialized"
+        super().__init__(message, line, column)
+
 class BuiltinFunctionWithoutParensError(SemanticError):
     def __init__(self, function_name, line=None, column=None):
         message = f"Built-in function '{function_name}' must be called with parentheses"

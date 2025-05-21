@@ -22,7 +22,6 @@ class Lexer:
         self.current_state = LexerState.INITIAL
 
         # Buffers and outputs
-        self.current_lexeme = ""   # Accumulates characters for the current token
         self.errors = []           # Collect errors here
         self.token_buffer = []
 
@@ -48,13 +47,16 @@ class Lexer:
         """
         Move to the next character, updating line and column numbers.
         """
+        
         if self.current_char == '\n':
             self.line += 1
             self.column = 0
-
+            
+        #increment position and column ONLY (no moving of tracked characters)
         self.position += 1
         self.column += 1
-
+        
+        # Update current_char to the next character in the code
         if self.position < len(self.code):
             self.current_char = self.code[self.position]
         else:
@@ -64,7 +66,7 @@ class Lexer:
         """
         Look ahead in the code without consuming characters.
         """
-        next_pos = self.position + offset
+        next_pos = self.position + offset 
         if next_pos < len(self.code):
             return self.code[next_pos]
         return None
@@ -254,7 +256,7 @@ class Lexer:
         return None
 
     #--------------------------------------------------------------------------
-    # Main public method: get_next_token
+    # Main public method: get_next_token (or the main loop)
     #--------------------------------------------------------------------------
     def get_next_token(self):
         """
@@ -262,7 +264,6 @@ class Lexer:
         🟢 GOES BACK TO INITIAL STATE AFTER EACH TOKEN
         """
         
-        self.current_lexeme = ""
         start_line = self.line
         start_column = self.column
 
@@ -613,8 +614,8 @@ class Lexer:
         if value[0].islower():
             token_type = self.keyword_check(value)
         
-        if token_type:
-            # -- It's a keyword --
+        if token_type: #check if token_type has a value
+            # -- It's a keyword -- 
             if self.current_char is not None:
                 valid_delims = valid_delimiters_keywords_dict.get(token_type, [])
                 two_char = self.current_char

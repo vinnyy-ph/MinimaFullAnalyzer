@@ -272,7 +272,7 @@ const Analyzer = ({ toggleSidebar: parentToggleSidebar, themeMode, toggleTheme }
 
   const handleAnalyze = () => {
     setLoading(true);
-    axios.post('http://localhost:5000/analyzeFull', { code })
+    axios.post('http://localhost:5000/analyze_full', { code })
     .then((response) => {
       const data = response.data;
       setTokens(data.tokens);

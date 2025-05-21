@@ -14,6 +14,7 @@ class Symbol:
         self.column = column
         self.var_type = var_type
         self.is_parameter = False
+        self.initialized = False  # Track if a variable has been initialized
 
 class SymbolTable:
     def __init__(self, parent=None):

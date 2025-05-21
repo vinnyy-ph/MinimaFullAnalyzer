@@ -1,7 +1,7 @@
 import re
 from lark import Visitor
 from .symbol_table import SymbolTable
-from .semantic_errors import InvalidListOperandError, ListIndexOutOfRangeError, SemanticError, FunctionRedefinedError, ParameterMismatchError, FunctionNotDefinedError, UndefinedIdentifierError, RedeclarationError, FixedVarReassignmentError, ControlFlowError, TypeMismatchError, UnreachableCodeError, InvalidListAccessError, InvalidGroupAccessError, NegationError, BuiltinFunctionWithoutParensError
+from .semantic_errors import InvalidListOperandError, ListIndexOutOfRangeError, SemanticError, FunctionRedefinedError, ParameterMismatchError, FunctionNotDefinedError, UndefinedIdentifierError, RedeclarationError, FixedVarReassignmentError, ControlFlowError, TypeMismatchError, UnreachableCodeError, InvalidListAccessError, InvalidGroupAccessError, NegationError, BuiltinFunctionWithoutParensError, UninitializedVariableError
 from ..CodegenTAC.built_in_functions import MinimaBultins
 def convert_state_to_int(state):
     return 1 if state == "YES" else 0
@@ -787,6 +787,8 @@ class SemanticAnalyzer(Visitor):
                 if isinstance(expr_value, tuple) and len(expr_value) >= 1:
                     if isinstance(expr_value, tuple) and len(expr_value) >= 1 and expr_value[0] == "get":
                         self.current_scope.variables[name].value = ("get", expr_value[1])
+                        # Mark as initialized for GET inputs
+                        self.current_scope.variables[name].initialized = True
                         prompt_text = str(expr_value[1])
                         if self.current_function:
                             print(f"Declared variable {name} with get input and prompt \"{prompt_text}\" inside function {self.current_function}")
@@ -807,18 +809,24 @@ class SemanticAnalyzer(Visitor):
                         else:
                             print(f"Declared global variable {name} with {prompt_count} get inputs and prompts {prompts_str}")
                         self.current_scope.variables[name].value = ("unknown", None)
+                        # Mark as initialized for GET inputs
+                        self.current_scope.variables[name].initialized = True
                     else:
                         if self.current_function:
                             print(f"Declared variable {name} inside function {self.current_function}")
                         else:
                             print(f"Declared global variable {name} with expression value {expr_value[1]} and type {expr_value[0]}")
                         self.current_scope.variables[name].value = expr_value
+                        # Mark as initialized when assigned an expression
+                        self.current_scope.variables[name].initialized = True
                 else:
                     if self.current_function:
                         print(f"Declared variable {name} inside function {self.current_function}")
                     else:
                         print(f"Declared global variable {name} with expression value {expr_value}")
                     self.current_scope.variables[name].value = expr_value
+                    # Mark as initialized when assigned an expression
+                    self.current_scope.variables[name].initialized = True
             else:
                 if self.current_function:
                     print(f"Declared variable {name} inside function {self.current_function}")
@@ -850,6 +858,8 @@ class SemanticAnalyzer(Visitor):
                 if isinstance(expr_value, tuple) and len(expr_value) >= 1:
                     if isinstance(expr_value, tuple) and len(expr_value) >= 1 and expr_value[0] == "get":
                         self.current_scope.variables[name].value = ("get", expr_value[1])
+                        # Mark as initialized for GET inputs
+                        self.current_scope.variables[name].initialized = True
                         prompt_text = str(expr_value[1])
                         if self.current_function:
                             print(f"Declared variable {name} with get input and prompt \"{prompt_text}\" inside function {self.current_function}")
@@ -870,18 +880,24 @@ class SemanticAnalyzer(Visitor):
                         else:
                             print(f"Declared global variable {name} with {prompt_count} get inputs and prompts {prompts_str}")
                         self.current_scope.variables[name].value = ("unknown", None)
+                        # Mark as initialized for GET inputs
+                        self.current_scope.variables[name].initialized = True
                     else:
                         if self.current_function:
                             print(f"Declared variable {name} with expression value {expr_value[1]} and type {expr_value[0]} inside function {self.current_function}")
                         else:
                             print(f"Declared global variable {name} with expression value {expr_value[1]} and type {expr_value[0]}")
                         self.current_scope.variables[name].value = expr_value
+                        # Mark as initialized when assigned an expression
+                        self.current_scope.variables[name].initialized = True
                 else:
                     if self.current_function:
                         print(f"Declared variable {name} with expression value {expr_value} inside function {self.current_function}")
                     else:
                         print(f"Declared global variable {name} with expression value {expr_value}")
                     self.current_scope.variables[name].value = expr_value
+                    # Mark as initialized when assigned an expression
+                    self.current_scope.variables[name].initialized = True
             else:
                 if self.current_function:
                     print(f"Declared variable {name} with empty value inside function {self.current_function}")
@@ -931,6 +947,8 @@ class SemanticAnalyzer(Visitor):
                 if isinstance(expr_value, tuple) and len(expr_value) >= 1:
                     if isinstance(expr_value, tuple) and len(expr_value) >= 1 and expr_value[0] == "get":
                         self.current_scope.variables[name].value = ("get", expr_value[1])
+                        # Mark as initialized for GET inputs
+                        self.current_scope.variables[name].initialized = True
                         prompt_text = str(expr_value[1])
                         if self.current_function:
                             print(f"Declared fixed variable {name} with get input and prompt \"{prompt_text}\" inside function {self.current_function}")
@@ -951,12 +969,16 @@ class SemanticAnalyzer(Visitor):
                         else:
                             print(f"Declared global fixed variable {name} with {prompt_count} get inputs and prompts {prompts_str}")
                         self.current_scope.variables[name].value = ("unknown", None)
+                        # Mark as initialized for GET inputs
+                        self.current_scope.variables[name].initialized = True
                     else:
                         if self.current_function:
                             print(f"Declared fixed variable {name} with expression value {expr_value[1]} and type {expr_value[0]} inside function {self.current_function}")
                         else:
                             print(f"Declared global fixed variable {name} with expression value {expr_value[1]} and type {expr_value[0]}")
                         self.current_scope.variables[name].value = expr_value
+                        # Mark as initialized when assigned an expression
+                        self.current_scope.variables[name].initialized = True
                 else:
                     if self.current_function:
                         print(f"Declared fixed variable {name} with expression value {expr_value} inside function {self.current_function}")
@@ -994,6 +1016,8 @@ class SemanticAnalyzer(Visitor):
                 if isinstance(expr_value, tuple) and len(expr_value) >= 1:
                     if isinstance(expr_value, tuple) and len(expr_value) >= 1 and expr_value[0] == "get":
                         self.current_scope.variables[name].value = ("get", expr_value[1])
+                        # Mark as initialized for GET inputs
+                        self.current_scope.variables[name].initialized = True
                         prompt_text = str(expr_value[1])
                         if self.current_function:
                             print(f"Declared fixed variable {name} with get input and prompt \"{prompt_text}\" inside function {self.current_function}")
@@ -1014,30 +1038,24 @@ class SemanticAnalyzer(Visitor):
                         else:
                             print(f"Declared global fixed variable {name} with {prompt_count} get inputs and prompts {prompts_str}")
                         self.current_scope.variables[name].value = ("unknown", None)
+                        # Mark as initialized for GET inputs
+                        self.current_scope.variables[name].initialized = True
                     else:
                         if self.current_function:
                             print(f"Declared fixed variable {name} with expression value {expr_value[1]} and type {expr_value[0]} inside function {self.current_function}")
                         else:
                             print(f"Declared global fixed variable {name} with expression value {expr_value[1]} and type {expr_value[0]}")
                         self.current_scope.variables[name].value = expr_value
+                        # Mark as initialized when assigned an expression
+                        self.current_scope.variables[name].initialized = True
                 else:
                     if self.current_function:
                         print(f"Declared fixed variable {name} with expression value {expr_value} inside function {self.current_function}")
                     else:
                         print(f"Declared global fixed variable {name} with expression value {expr_value}")
                     self.current_scope.variables[name].value = expr_value
-            else:
-                if self.current_function:
-                    print(f"Declared fixed variable {name} with empty value inside function {self.current_function}")
-                else:
-                    print(f"Declared global fixed variable {name} with empty value")
-        else:
-            if self.current_function:
-                print(f"Declared fixed variable {name} with empty value inside function {self.current_function}")
-            else:
-                print(f"Declared global fixed variable {name} with empty value")
-        if len(children) > 4:
-            self.visit(children[4])
+                    # Mark as initialized when assigned an expression
+                    self.current_scope.variables[name].initialized = True
         return
     def visit_var_assign(self, node):
         """
@@ -1074,6 +1092,9 @@ class SemanticAnalyzer(Visitor):
         if symbol.fixed:
             self.errors.append(FixedVarReassignmentError(name, line, column))
             return
+        
+        # Mark the variable as initialized
+        symbol.initialized = True
             
         # Rest of the existing code
         has_accessor = False
@@ -1312,7 +1333,14 @@ class SemanticAnalyzer(Visitor):
                 self.errors.append(UndefinedIdentifierError(name, line, column))
                 result = ("unknown", None)
             else:
+                # Check if the variable is initialized before use
+                if not hasattr(symbol, 'initialized') or not symbol.initialized:
+                    # Only check non-parameter variables 
+                    if not hasattr(symbol, 'is_parameter') or not symbol.is_parameter:
+                        self.errors.append(UninitializedVariableError(name, line, column))
                 result = getattr(symbol, "value", ("empty", None))
+            
+            # Handle group/list access
             for child in children[1:]:
                 if hasattr(child, "data"):
                     if child.data == "id_usagetail":
@@ -1327,6 +1355,7 @@ class SemanticAnalyzer(Visitor):
                         access_result = self.visit(child)
                         if access_result is not None:
                             result = access_result
+                            
         self.values[id(node)] = result
         return result
 
@@ -1613,6 +1642,8 @@ class SemanticAnalyzer(Visitor):
             self.current_scope.define_variable(param_name, fixed=False, line=line, column=column)
             self.current_scope.variables[param_name].value = ("parameter", None)
             self.current_scope.variables[param_name].is_parameter = True
+            # Parameters are always considered initialized
+            self.current_scope.variables[param_name].initialized = True
             
         function_body = node.children[6]
         self.visit(function_body)

@@ -6,13 +6,11 @@ from backend.Semantic.semantic_analyzer import SemanticAnalyzer
 from backend.CodegenTAC.code_executor import execute_code, format_tac_instructions
 from backend.CodegenTAC.built_in_functions import MinimaBultins
 import io
-import sys
-import uuid
 from contextlib import redirect_stdout
 app = Flask(__name__)
 CORS(app)
-execution_states = {}
-@app.route('/analyzeFull', methods=['POST'])
+execution_states = {} #debugging purposes
+@app.route('/analyze_full', methods=['POST'])
 def analyze_full():
     data = request.get_json()
     code = data.get('code', '')
