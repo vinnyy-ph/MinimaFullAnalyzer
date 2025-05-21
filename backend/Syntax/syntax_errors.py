@@ -50,6 +50,24 @@ def process_syntax_error(
             "next", "each", "repeat", "do", "integer", "point", "state",
             "text", "empty", "get"
         }
+        # Add built-in functions to keywords
+        BUILTIN_FUNCTIONS = {
+            "abs", "ceil", "contains", "factorial", "floor", "isqrt", "join",
+            "length", "lowercase", "max", "min", "pow", "reverse", "round",
+            "slice", "sorted", "sum", "type", "unique", "uppercase"
+        }
+        # Combine regular keywords and built-in functions
+        KEYWORDS = KEYWORDS.union(BUILTIN_FUNCTIONS)
+        
+        # Map for uppercase token versions to lowercase display
+        BUILTIN_UPPERCASE_MAP = {
+            "ABS": "abs", "CEIL": "ceil", "CONTAINS": "contains", "FACTORIAL": "factorial",
+            "FLOOR": "floor", "ISQRT": "isqrt", "JOIN": "join", "LENGTH": "length",
+            "LOWERCASE": "lowercase", "MAX": "max", "MIN": "min", "POW": "pow",
+            "REVERSE": "reverse", "ROUND": "round", "SLICE": "slice", "SORTED": "sorted",
+            "SUM": "sum", "TYPE": "type", "UNIQUE": "unique", "UPPERCASE": "uppercase"
+        }
+        
         LITERALS = {
             "TEXTLITERAL", "INTEGERLITERAL", "NEGINTEGERLITERAL",
             "POINTLITERAL", "NEGPOINTLITERAL", "STATELITERAL"
@@ -60,7 +78,11 @@ def process_syntax_error(
         others_cat = []
         for token in tokens:
             token_str = str(token)
-            if token_str in KEYWORDS:
+            
+            # Check if the token is a built-in function in uppercase form
+            if token_str in BUILTIN_UPPERCASE_MAP:
+                keywords_cat.append(BUILTIN_UPPERCASE_MAP[token_str])
+            elif token_str in KEYWORDS:
                 keywords_cat.append(token_str)
             elif token_str in LITERALS:
                 literals_cat.append(token_str)
@@ -120,29 +142,24 @@ def process_syntax_error(
     # Filter the expected tokens based on brackets and grammar
     filtered_expected = []
     
-    # If we have an unexpected token that's a grammar error, filter based on that
-    if unexpected_grammar_error:
-        # Keep only non-bracket tokens and the expected bracket according to grammar
-        for token in mapped_expected:
-            if token not in all_brackets or token in expected_tokens:
+    # Analyze which brackets are open in the code fragment
+    open_brackets = analyze_open_brackets(line_fragment)
+    
+    # Filter out closing brackets that don't match any open brackets
+    valid_closers = set()
+    if open_brackets:
+        # Only the most recently opened bracket can be closed next
+        valid_closers.add(bracket_pairs[open_brackets[-1]])
+    
+    # Always keep non-bracket tokens and opening brackets in expected tokens
+    # Only filter closing brackets based on the current bracket context
+    for token in mapped_expected:
+        if token in bracket_pairs.values():  # If token is a closing bracket
+            if token in valid_closers:
                 filtered_expected.append(token)
-    else:
-        # Analyze which brackets are open in the code fragment
-        open_brackets = analyze_open_brackets(line_fragment)
-        
-        # Filter out closing brackets that don't match any open brackets
-        valid_closers = set()
-        if open_brackets:
-            # Only the most recently opened bracket can be closed next
-            valid_closers.add(bracket_pairs[open_brackets[-1]])
-        
-        for token in mapped_expected:
-            if token in bracket_pairs.values():  # Closing brackets
-                if token in valid_closers:
-                    filtered_expected.append(token)
-            else:
-                # Keep all non-bracket tokens
-                filtered_expected.append(token)
+        else:
+            # For all other tokens (including opening brackets), keep them
+            filtered_expected.append(token)
 
     # Categorize the filtered tokens for display
     keywords_cat, literals_cat, symbols_cat, others_cat = categorize_tokens(filtered_expected)
