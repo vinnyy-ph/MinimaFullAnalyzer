@@ -13,33 +13,51 @@ def format_minima_number(value):
     """
     Format a number for output according to Minima language rules.
     - Use hyphen (-) for negative numbers
-    - Limit decimal places to maximum of 9 digits
+    - Limit decimal places to maximum of 9 digits without rounding
     - Ensure integers are within -999999999 to 999999999
     """
     if not isinstance(value, (int, float)):
         return value
     if isinstance(value, float) and value.is_integer():
         value = int(value)
-    if value < 0:
-        if isinstance(value, float):
-            formatted = f"-{abs(value):.9f}".rstrip('0').rstrip('.')
-            parts = formatted.split('.')
-            if len(parts) > 1 and len(parts[1]) > 9:
-                parts[1] = parts[1][:9]
-                formatted = f"-{parts[0]}.{parts[1]}"
-            return formatted
-        else:
+    if isinstance(value, int):
+        if value < 0:
             return f"-{abs(value)}"
-    else:
-        if isinstance(value, float):
-            formatted = f"{value:.9f}".rstrip('0').rstrip('.')
-            parts = formatted.split('.')
-            if len(parts) > 1 and len(parts[1]) > 9:
-                parts[1] = parts[1][:9]
-                formatted = f"{parts[0]}.{parts[1]}"
-            return formatted
+        return str(value)
+    
+    # For floating point values, use direct string representation to avoid rounding errors
+    # This is especially important for large values with many decimal places
+    str_val = f"{value}"
+    
+    # If the string contains scientific notation, convert it to a regular decimal format
+    if 'e' in str_val.lower():
+        from decimal import Decimal, getcontext
+        getcontext().prec = 100
+        decimal_val = Decimal(str_val)
+        str_val = f"{decimal_val:.30f}".rstrip('0').rstrip('.')
+    
+    # Determine sign and split parts
+    sign = "-" if value < 0 else ""
+    abs_str = str_val.lstrip('-')
+    
+    if '.' in abs_str:
+        int_part, frac_part = abs_str.split('.')
+        
+        # Limit decimal places to 9 without rounding
+        if len(frac_part) > 9:
+            frac_part = frac_part[:9]
+        
+        # Remove trailing zeros
+        frac_part = frac_part.rstrip('0')
+        
+        # Assemble result - only include decimal point if we have a fractional part
+        if frac_part:
+            return f"{sign}{int_part}.{frac_part}"
         else:
-            return str(value)
+            return f"{sign}{int_part}"
+    else:
+        # It's actually an integer stored as a float
+        return f"{sign}{abs_str}"
 def format_minima_output(output_text):
     """
     Ensure all negative numbers in output are displayed with hyphen notation.
@@ -63,9 +81,13 @@ def format_minima_output(output_text):
         whole = match.group(1)
         decimal = match.group(2)
         if len(decimal) > 9:
+            # Truncate without rounding to preserve original digits
             decimal = decimal[:9]
         return f"{whole}.{decimal}"
+    # First handle the case of 10+ decimal places
     formatted_text = re.sub(r'((?:-)?\d+)\.(\d{10,})', trim_decimals, formatted_text)
+    # Also catch any cases that might have been rounded during string conversion
+    formatted_text = re.sub(r'((?:-)?\d+\.\d*?)9{3,}(\d*)', lambda m: f"{m.group(1)}{m.group(2)}", formatted_text)
     return formatted_text
 def execute_code(code, execution_id=None, user_input=None, debug_mode=False):
     """

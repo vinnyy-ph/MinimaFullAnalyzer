@@ -39,20 +39,42 @@ class TACInterpreter:
             if value < self.min_number or value > self.max_number:
                 raise ValueError(f"Integer out of range: {value}. Valid range is {self.min_number} to {self.max_number}")
         elif isinstance(value, float):
-            str_val = str(abs(value))
-            parts = str_val.split('.')
+            # Get the exact string representation of the value
+            str_val = f"{value}"
+            
+            # If the string contains scientific notation, convert it to a regular decimal format
+            if 'e' in str_val.lower():
+                # Set high precision for Decimal operations
+                getcontext().prec = 100
+                # Create a Decimal from the string and then format it to a regular decimal
+                decimal_val = Decimal(str_val)
+                str_val = f"{decimal_val:.30f}".rstrip('0').rstrip('.')
+            
+            # Work with the absolute value string representation
+            abs_str = str_val.lstrip('-')
+            parts = abs_str.split('.')
             integer_part = parts[0]
+            
             if len(integer_part) > self.max_digits:
                 raise ValueError(f"Number has too many digits in integer part: {value}. Maximum {self.max_digits} digits allowed")
+            
             if len(parts) > 1:
                 fractional_part = parts[1]
                 if len(fractional_part) > self.max_digits:
-                    truncated = round(value, self.max_digits)
-                    return truncated
+                    # Get the sign for later reconstruction
+                    sign = -1 if value < 0 else 1
+                    # Truncate the fractional part to preserve original digits without rounding
+                    truncated_frac = fractional_part[:self.max_digits]
+                    # Reconstruct the number using the exact string representation
+                    # This avoids binary floating-point precision issues
+                    new_value_str = f"{integer_part}.{truncated_frac}"
+                    return float(new_value_str) * sign
+            
             if abs(value) > float(self.max_number) + (1.0 - 10**(-self.max_digits)):
                 raise ValueError(f"Float value out of range: {value}. Valid range is ~{self.min_number} to {self.max_number}")
-        return value
         
+        return value
+
     def format_number_for_output(self, value):
         """Format number for output according to Minima language rules."""
         if not isinstance(value, (int, float)):
@@ -70,35 +92,43 @@ class TACInterpreter:
                 return f"-{abs(value)}"
             return str(value)
         
-        # Set precision high enough to avoid rounding errors
-        getcontext().prec = 28
+        # For floating point numbers, use the Decimal module to preserve exact decimal representation
         
-        # Convert to Decimal for more accurate string representation
-        decimal_val = Decimal(str(value))
+        # Set extremely high precision for internal calculations
+        getcontext().prec = 100
         
-        # Format the number (limit to max_digits for fractional part)
-        sign = "-" if decimal_val < 0 else ""
-        abs_decimal = abs(decimal_val)
+        # Convert to string first to preserve the exact original digits
+        # This is important because creating a Decimal directly from a float can inherit the binary imprecision
+        str_val = f"{value}"
         
-        # Convert to string with high precision
-        str_val = str(abs_decimal)
+        # If the string contains scientific notation, convert it to a regular decimal format
+        if 'e' in str_val.lower():
+            # Create a Decimal from the string and then format it to a regular decimal
+            decimal_val = Decimal(str_val)
+            str_val = f"{decimal_val:.30f}".rstrip('0').rstrip('.')
         
-        # Split into integer and fractional parts
-        parts = str_val.split('.')
-        int_part = parts[0]
+        # Determine sign and split parts
+        sign = "-" if value < 0 else ""
+        abs_str = str_val.lstrip('-')
         
-        if len(parts) > 1:
-            # Limit fractional part to max_digits
-            frac_part = parts[1][:self.max_digits]
+        if '.' in abs_str:
+            int_part, frac_part = abs_str.split('.')
+            
+            # Preserve the exact fractional part up to max_digits without rounding
+            if len(frac_part) > self.max_digits:
+                frac_part = frac_part[:self.max_digits]
+            
             # Remove trailing zeros
             frac_part = frac_part.rstrip('0')
             
+            # Assemble result - only include decimal point if we have a fractional part
             if frac_part:
                 return f"{sign}{int_part}.{frac_part}"
             else:
                 return f"{sign}{int_part}"
         else:
-            return f"{sign}{int_part}"
+            # It's actually an integer stored as a float
+            return f"{sign}{abs_str}"
 
     def set_execution_limit(self, limit=None):
         """
