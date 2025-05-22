@@ -2,6 +2,7 @@ from backend.CodegenTAC.built_in_functions import MinimaBultins
 from io import StringIO
 import traceback  
 import math
+from decimal import Decimal, getcontext
 
 class TACInterpreter:
     def __init__(self):
@@ -51,7 +52,7 @@ class TACInterpreter:
             if abs(value) > float(self.max_number) + (1.0 - 10**(-self.max_digits)):
                 raise ValueError(f"Float value out of range: {value}. Valid range is ~{self.min_number} to {self.max_number}")
         return value
-
+        
     def format_number_for_output(self, value):
         """Format number for output according to Minima language rules."""
         if not isinstance(value, (int, float)):
@@ -60,20 +61,44 @@ class TACInterpreter:
             self.validate_number(value)
         except ValueError as e:
             raise ValueError(f"Output formatting error: {e}")
+        
         if isinstance(value, float) and value.is_integer():
             value = int(value)
+        
         if isinstance(value, int):
             if value < 0:
                 return f"-{abs(value)}"
             return str(value)
-        if value < 0:
-            formatted = f"{abs(value):.{self.max_digits}f}".rstrip('0').rstrip('.')
-            if formatted == "0.": formatted = "0"
-            return f"-{formatted}"
+        
+        # Set precision high enough to avoid rounding errors
+        getcontext().prec = 28
+        
+        # Convert to Decimal for more accurate string representation
+        decimal_val = Decimal(str(value))
+        
+        # Format the number (limit to max_digits for fractional part)
+        sign = "-" if decimal_val < 0 else ""
+        abs_decimal = abs(decimal_val)
+        
+        # Convert to string with high precision
+        str_val = str(abs_decimal)
+        
+        # Split into integer and fractional parts
+        parts = str_val.split('.')
+        int_part = parts[0]
+        
+        if len(parts) > 1:
+            # Limit fractional part to max_digits
+            frac_part = parts[1][:self.max_digits]
+            # Remove trailing zeros
+            frac_part = frac_part.rstrip('0')
+            
+            if frac_part:
+                return f"{sign}{int_part}.{frac_part}"
+            else:
+                return f"{sign}{int_part}"
         else:
-            formatted = f"{value:.{self.max_digits}f}".rstrip('0').rstrip('.')
-            if formatted == "0.": formatted = "0"
-            return formatted
+            return f"{sign}{int_part}"
 
     def set_execution_limit(self, limit=None):
         """
