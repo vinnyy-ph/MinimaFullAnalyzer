@@ -873,50 +873,117 @@ class TACGenerator(Visitor):
             ret_temp = self.get_temp()
             self.emit('CALL', var_name, len(args), ret_temp)
             return ret_temp
+        
+        # Track if we've encountered a group or list access
+        has_accessor = False
+        access_temp = None
+        access_type = None  # Will be 'list' or 'group'
+        index_value = None  # Store the index/key for later use
+        
         for child in node.children[1:]:
             if hasattr(child, 'data') and child.data == 'group_or_list':
+                has_accessor = True
                 index_expr = self.visit(child.children[1])
-                temp = self.get_temp()
+                access_temp = self.get_temp()
                 is_list_access = child.children[0].type == "LSQB"
+                access_type = 'list' if is_list_access else 'group'
+                
+                # Store the index/key value for later use in unary operations
+                if isinstance(index_expr, tuple) and len(index_expr) >= 2:
+                    index_value = index_expr[1]
+                else:
+                    index_value = index_expr
+                
                 if is_list_access:
                     if isinstance(index_expr, tuple) and index_expr[0] == 'id':
                         temp_idx = self.get_temp()
                         self.emit('ASSIGN', index_expr[1], None, temp_idx)
-                        self.emit('LIST_ACCESS', var_name, temp_idx, temp)
+                        self.emit('LIST_ACCESS', var_name, temp_idx, access_temp)
                     else:
                         index_val = index_expr[1] if isinstance(index_expr, tuple) and len(index_expr) >= 2 else index_expr
-                        self.emit('LIST_ACCESS', var_name, index_val, temp)
+                        self.emit('LIST_ACCESS', var_name, index_val, access_temp)
                 else:
                     index_val = index_expr[1] if isinstance(index_expr, tuple) and len(index_expr) >= 2 else index_expr
-                    self.emit('GROUP_ACCESS', var_name, index_val, temp)
-                return temp
+                    self.emit('GROUP_ACCESS', var_name, index_val, access_temp)
+                
             if hasattr(child, 'data') and child.data == 'id_usagetail':
                 for subchild in child.children:
                     if hasattr(subchild, 'data') and subchild.data == 'group_or_list' and subchild.children:
+                        has_accessor = True
                         index_expr = self.visit(subchild.children[1])
-                        temp = self.get_temp()
+                        access_temp = self.get_temp()
                         is_list_access = subchild.children[0].type == "LSQB"
-                        index_val = index_expr
+                        access_type = 'list' if is_list_access else 'group'
+                        
+                        # Store the index/key value for later use in unary operations
                         if isinstance(index_expr, tuple) and len(index_expr) >= 2:
-                            index_val = index_expr[1] 
-                        if is_list_access:
-                            self.emit('LIST_ACCESS', var_name, index_val, temp)
+                            index_value = index_expr[1]
                         else:
-                            self.emit('GROUP_ACCESS', var_name, index_val, temp)
-                        return temp
+                            index_value = index_expr
+                        
+                        if is_list_access:
+                            self.emit('LIST_ACCESS', var_name, index_value, access_temp)
+                        else:
+                            self.emit('GROUP_ACCESS', var_name, index_value, access_temp)
+                    
+                    # Handle unary operations
                     if hasattr(subchild, 'data') and subchild.data == 'unary_op':
                         if subchild.children and hasattr(subchild.children[0], 'type'):
                             op_type = subchild.children[0].type
-                            if op_type == 'INC_OP':  
-                                temp = self.get_temp()
-                                self.emit('ASSIGN', var_name, None, temp)
-                                self.emit('ADD', var_name, 1, var_name)
-                                return temp
-                            elif op_type == 'DEC_OP': 
-                                temp = self.get_temp()
-                                self.emit('ASSIGN', var_name, None, temp)
-                                self.emit('SUB', var_name, 1, var_name)
-                                return temp
+                            
+                            # If we have an accessor, we need to handle the increment/decrement differently
+                            if has_accessor and access_temp is not None and index_value is not None:
+                                # For list or group element increment/decrement
+                                if op_type == 'INC_OP':
+                                    # Save the original value before incrementing
+                                    result_temp = self.get_temp()
+                                    self.emit('ASSIGN', access_temp, None, result_temp)
+                                    
+                                    # Increment the value
+                                    incremented_temp = self.get_temp()
+                                    self.emit('ADD', access_temp, 1, incremented_temp)
+                                    
+                                    # Update the list or group with the incremented value
+                                    if access_type == 'list':
+                                        self.emit('LIST_SET', var_name, index_value, incremented_temp)
+                                    else:
+                                        self.emit('GROUP_SET', var_name, index_value, incremented_temp)
+                                    
+                                    return result_temp
+                                    
+                                elif op_type == 'DEC_OP':
+                                    # Save the original value before decrementing
+                                    result_temp = self.get_temp()
+                                    self.emit('ASSIGN', access_temp, None, result_temp)
+                                    
+                                    # Decrement the value
+                                    decremented_temp = self.get_temp()
+                                    self.emit('SUB', access_temp, 1, decremented_temp)
+                                    
+                                    # Update the list or group with the decremented value
+                                    if access_type == 'list':
+                                        self.emit('LIST_SET', var_name, index_value, decremented_temp)
+                                    else:
+                                        self.emit('GROUP_SET', var_name, index_value, decremented_temp)
+                                    
+                                    return result_temp
+                            else:
+                                # Regular variable increment/decrement (unchanged from original)
+                                if op_type == 'INC_OP':  
+                                    temp = self.get_temp()
+                                    self.emit('ASSIGN', var_name, None, temp)
+                                    self.emit('ADD', var_name, 1, var_name)
+                                    return temp
+                                elif op_type == 'DEC_OP': 
+                                    temp = self.get_temp()
+                                    self.emit('ASSIGN', var_name, None, temp)
+                                    self.emit('SUB', var_name, 1, var_name)
+                                    return temp
+        
+        # If we have an accessor but no unary operations, return the access result
+        if has_accessor and access_temp is not None:
+            return access_temp
+            
         return ('id', var_name)
     def visit_id_usagetail(self, node):
         """Handle post-increment and post-decrement operations"""
