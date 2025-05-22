@@ -2066,6 +2066,8 @@ class SemanticAnalyzer(Visitor):
         group_members = []
         self.visit_group_members(node.children[3], group_data, group_members)
         self.current_scope.variables[name].value = ("group", group_members)
+        # Mark the group variable as initialized
+        self.current_scope.variables[name].initialized = True
         print(f"Declared group {name} with {len(group_members)} members:")
         for key, value in group_members:
             print(f"{key[1]} ({key[0]}) : {value[1]} ({value[0]})")
