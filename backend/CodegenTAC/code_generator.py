@@ -16,6 +16,7 @@ class TACGenerator(Visitor):
         self.debug_mode = debug_mode
         self.expression_depth = 0  # Track expression nesting depth
         self.processed_expressions = {}  # Cache for processed expressions
+        self.paren_depth_cache = {}  # Cache for parentheses depth calculations
     def push_loop(self, start_label, end_label):
         """Push a new loop context onto the stack."""
         self.loop_stack.append((start_label, end_label))
@@ -86,6 +87,7 @@ class TACGenerator(Visitor):
         self.variable_types = {}
         self.values = {}
         self.processed_expressions = {}  # Reset expression cache
+        self.paren_depth_cache = {}      # Reset parenthesis depth cache
         
         # Start traversal
         self.visit(tree)
@@ -428,13 +430,44 @@ class TACGenerator(Visitor):
                     self.emit('INPUT', prompt, None, temp)
                     return ('text', temp)
         
-        # Check for and prioritize parenthesized expressions first
-        for child in node.children:
-            if self._contains_parenthesized_expr(child):
-                # Process all parenthesized expressions first
-                self._process_parenthesized_expr(child)
+        # First, find all nodes with parenthesized expressions
+        nodes_with_parens = []
         
-        # Process the expression following precedence rules
+        # Function to collect all parenthesized nodes with their depths
+        def collect_paren_nodes(node, path=None):
+            if path is None:
+                path = []
+            
+            if hasattr(node, 'data'):
+                # Check if this node is a parenthesized expression
+                is_paren = node.data == 'primary_expr' and len(node.children) > 1 and \
+                        hasattr(node.children[0], 'type') and node.children[0].type == 'LPAREN'
+                
+                if is_paren:
+                    # Calculate its parentheses nesting depth
+                    depth = self._calculate_paren_depth(node)
+                    nodes_with_parens.append((node, depth, path + [node]))
+                
+                # Recursively check all children
+                for i, child in enumerate(node.children):
+                    collect_paren_nodes(child, path + [child])
+        
+        # Collect all parenthesized expressions in the tree
+        collect_paren_nodes(node)
+        
+        # Sort by depth in descending order (process deepest/innermost first)
+        nodes_with_parens.sort(key=lambda x: x[1], reverse=True)
+        
+        # Process parenthesized expressions in order from innermost to outermost
+        for paren_node, depth, _ in nodes_with_parens:
+            if self.debug_mode:
+                print(f"Processing parenthesized expression with depth {depth}")
+            node_key = id(paren_node)
+            if node_key not in self.processed_expressions:
+                result = self.visit(paren_node)
+                self.processed_expressions[node_key] = result
+        
+        # Now process the expression following precedence rules
         return self.visit(node.children[0])
         
     def _contains_parenthesized_expr(self, node):
@@ -449,8 +482,17 @@ class TACGenerator(Visitor):
         return False
         
     def _process_parenthesized_expr(self, node):
-        """Pre-process all parenthesized expressions to ensure they are evaluated first."""
+        """
+        Pre-process all parenthesized expressions to ensure they are evaluated first.
+        This function recursively finds and evaluates inner parentheses before outer ones.
+        """
         if hasattr(node, 'data'):
+            # First process any child nodes that might contain even deeper parentheses
+            for child in node.children:
+                if self._contains_parenthesized_expr(child):
+                    self._process_parenthesized_expr(child)
+                    
+            # Now process this node if it's a parenthesized expression
             if node.data == 'primary_expr':
                 if len(node.children) > 1 and hasattr(node.children[0], 'type') and node.children[0].type == 'LPAREN':
                     # Generate a unique key for this node
@@ -779,21 +821,19 @@ class TACGenerator(Visitor):
                     print(f"Reusing cached result for parenthesized expression {node_key}")
                 return self.processed_expressions[node_key]
             
-            if self.debug_mode:
-                print(f"Processing parenthesized expression at depth {getattr(node, 'depth', 'unknown')}")
-            
             # Track entry into parenthesized expression
             self.enter_expression()
             if self.debug_mode:
                 print(f"Entered parenthesized expression at depth {self.expression_depth}")
             
             # For PEMDAS, ensure all expressions inside parentheses are evaluated completely first
-            for child in node.children:
-                if hasattr(child, 'data') and child.data == 'expression':
-                    # Check for and prioritize any nested parenthesized expressions
-                    for subchild in child.children:
-                        if self._contains_parenthesized_expr(subchild):
-                            self._process_parenthesized_expr(subchild)
+            # Check for any nested parenthesized expressions inside this one
+            if len(node.children) > 1 and hasattr(node.children[1], 'data'):
+                inner_expr = node.children[1]
+                # Process nested parentheses first (if any)
+                for subchild in inner_expr.children:
+                    if self._contains_parenthesized_expr(subchild):
+                        self._process_parenthesized_expr(subchild)
             
             # Now evaluate the inner expression
             expr_result = self.visit(node.children[1])
@@ -1750,6 +1790,41 @@ class TACGenerator(Visitor):
         self.visit_group_members(node.children[1], group_temp)
         
         return None
+
+    def _calculate_paren_depth(self, node, current_depth=0):
+        """
+        Calculate the maximum nesting depth of parenthesized expressions in a node.
+        Higher depths should be processed first (innermost parentheses).
+        Uses caching for optimization.
+        """
+        node_id = id(node)
+        cache_key = (node_id, current_depth)
+        
+        # Check if we've already calculated this depth
+        if cache_key in self.paren_depth_cache:
+            return self.paren_depth_cache[cache_key]
+            
+        if not hasattr(node, 'data'):
+            return current_depth
+            
+        max_depth = current_depth
+        
+        # If this is a parenthesized expression, increment depth for children
+        is_paren = node.data == 'primary_expr' and len(node.children) > 1 and \
+                  hasattr(node.children[0], 'type') and node.children[0].type == 'LPAREN'
+        
+        child_depth = current_depth + 1 if is_paren else current_depth
+        
+        # Calculate max depth among all children
+        for child in node.children:
+            if hasattr(child, 'data'):
+                child_max = self._calculate_paren_depth(child, child_depth)
+                max_depth = max(max_depth, child_max)
+        
+        # Cache the result before returning
+        self.paren_depth_cache[cache_key] = max_depth
+                
+        return max_depth
 
     def get_source_position(self, node):
         """
