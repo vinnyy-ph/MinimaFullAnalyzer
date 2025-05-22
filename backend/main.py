@@ -13,10 +13,10 @@ execution_states = {} #debugging purposes
 @app.route('/analyze_full', methods=['POST'])
 def analyze_full():
     data = request.get_json()
-    code = data.get('code', '')
+    minima_code_input = data.get('code', '')
     output_buffer = io.StringIO()
     with redirect_stdout(output_buffer):
-        lexer = Lexer(code)
+        lexer = Lexer(minima_code_input)
         all_tokens = lexer.tokenize_all()
         tokens = []
         for token in all_tokens:
@@ -42,7 +42,8 @@ def analyze_full():
         syntax_errors = []
         semantic_errors  = []
         if not lexical_errors: #if lexical_errors dictionary is empty, continue with syntax analysis
-            success, result = analyze_syntax(code)
+            # Pass the tokens and lexical errors to avoid redundant analysis
+            success, result = analyze_syntax(minima_code_input, pre_analyzed_tokens=all_tokens, lexical_errors=lexical_errors)
             if success:
                 parse_tree = result
                 semantic_analyzer = SemanticAnalyzer()
@@ -75,9 +76,9 @@ def analyze_full():
 @app.route('/getSymbolTable', methods=['POST'])
 def get_symbol_table():
     data = request.get_json()
-    code = data.get('code', '')
+    minima_code_input = data.get('code', '')
     
-    if not code:
+    if not minima_code_input:
         return jsonify({
             'success': False,
             'error': 'No code provided'
@@ -85,7 +86,7 @@ def get_symbol_table():
     
     try:
         # First check for lexical errors
-        lexer = Lexer(code)
+        lexer = Lexer(minima_code_input)
         all_tokens = lexer.tokenize_all()
         
         # Filter out warnings from actual errors
@@ -98,7 +99,7 @@ def get_symbol_table():
             })
         
         # If no lexical errors, try to parse
-        success, result = analyze_syntax(code)
+        success, result = analyze_syntax(minima_code_input, pre_analyzed_tokens=all_tokens, lexical_errors=lexical_errors)
         if not success:
             return jsonify({
                 'success': False,
@@ -219,9 +220,9 @@ def get_symbol_table():
 @app.route('/getAST', methods=['POST'])
 def get_ast():
     data = request.get_json()
-    code = data.get('code', '')
+    minima_code_input = data.get('code', '')
     
-    if not code:
+    if not minima_code_input:
         return jsonify({
             'success': False,
             'error': 'No code provided'
@@ -229,7 +230,7 @@ def get_ast():
     
     try:
         # First check for lexical errors
-        lexer = Lexer(code)
+        lexer = Lexer(minima_code_input)
         all_tokens = lexer.tokenize_all()
         
         # Filter out warnings from actual errors
@@ -242,7 +243,7 @@ def get_ast():
             })
         
         # If no lexical errors, try to parse
-        success, result = analyze_syntax(code)
+        success, result = analyze_syntax(minima_code_input, pre_analyzed_tokens=all_tokens, lexical_errors=lexical_errors)
         if not success:
             return jsonify({
                 'success': False,
@@ -278,14 +279,14 @@ def get_ast():
 @app.route('/executeCode', methods=['POST'])
 def execute_code_route():
     data = request.json
-    code = data.get('code', '')
+    minima_code_input = data.get('code', '')
     execution_id = data.get('executionId')
     user_input = data.get('userInput')
     if execution_id:
         print(f"Continuing execution {execution_id} with input: {user_input}")
     else:
-        print(f"New code execution request of length {len(code)}")
-    result = execute_code(code, execution_id, user_input)
+        print(f"New code execution request of length {len(minima_code_input)}")
+    result = execute_code(minima_code_input, execution_id, user_input)
     if result is None:
         return jsonify({
             'success': False,
