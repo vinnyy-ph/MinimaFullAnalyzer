@@ -1717,3 +1717,48 @@ class TACGenerator(Visitor):
     def get_current_expression_depth(self):
         """Get the current nesting level of expressions"""
         return self.expression_depth
+
+    def visit_fixed_declaration(self, node):
+        """Handle fixed variable declarations."""
+        if not node or not hasattr(node, 'children') or len(node.children) < 2:
+            return None
+        var_name = node.children[1].value
+        source_pos = self.get_source_position(node)
+        
+        if len(node.children) >= 3 and node.children[2] and node.children[2].value == '=':
+            # There is an initialization expression after the equal sign
+            if len(node.children) > 3 and node.children[3]:
+                init_expr = self.visit(node.children[3])
+                if isinstance(init_expr, tuple) and init_expr[0] in ('id','integer','float','bool','string','text'):
+                    self.emit('ASSIGN', init_expr[1], None, var_name,
+                             *(source_pos if source_pos else (None, None)))
+                    self.variable_types[var_name] = init_expr[0]
+                else:
+                    self.emit('ASSIGN', init_expr, None, var_name,
+                             *(source_pos if source_pos else (None, None)))
+        
+        # Process any fixed_tail for multiple declarations
+        if len(node.children) > 4 and node.children[4]:
+            self.visit(node.children[4])
+        return None
+    
+    def visit_fixed_tail(self, node):
+        """Handle additional fixed variable declarations."""
+        if not node or not hasattr(node, 'children') or len(node.children) < 2:
+            return None
+        var_name = node.children[1].value
+        source_pos = self.get_source_position(node)
+        
+        if len(node.children) >= 3 and node.children[2] and node.children[2].value == '=':
+            # There is an initialization expression after the equal sign
+            if len(node.children) > 3 and node.children[3]:
+                init_expr = self.visit(node.children[3])
+                if isinstance(init_expr, tuple) and init_expr[0] in ('id','integer','float','bool','string','text'):
+                    self.emit('ASSIGN', init_expr[1], None, var_name,
+                             *(source_pos if source_pos else (None, None)))
+                    self.variable_types[var_name] = init_expr[0]
+                else:
+                    self.emit('ASSIGN', init_expr, None, var_name,
+                             *(source_pos if source_pos else (None, None)))
+        
+        return None

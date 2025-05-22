@@ -334,8 +334,10 @@ class SemanticAnalyzer(Visitor):
             use_point = True
         elif left[0] == "point" or right[0] == "point":
             use_point = True
-        elif (left[0] == "state" and right[0] == "point") or (left[0] == "state" and right[0] == "state"):
-            use_point = False
+        elif (left[0] == "state" and right[0] == "point") or (left[0] == "point" and right[0] == "state"):
+            use_point = True
+        
+        # Always properly convert state values for arithmetic operations
         L = self.to_numeric(left[0], left[1], "point" if use_point else "int")
         R = self.to_numeric(right[0], right[1], "point" if use_point else "int")
         original_L_was_none = False
@@ -534,10 +536,20 @@ class SemanticAnalyzer(Visitor):
                 result = ("state", "YES" if comparison_result else "NO")
             else:
                 try:
+                    # Convert state values to numeric for comparison
+                    left_value = left[1]
+                    right_value = right[1]
+                    
+                    # Convert state to numeric if one operand is numeric and the other is state
+                    if left[0] == "state" and right[0] in ["integer", "point"]:
+                        left_value = convert_state_to_int(left[1])
+                    elif right[0] == "state" and left[0] in ["integer", "point"]:
+                        right_value = convert_state_to_int(right[1])
+                    
                     if op == "==":
-                        comparison_result = left[1] == right[1]
+                        comparison_result = left_value == right_value
                     else: 
-                        comparison_result = left[1] != right[1]
+                        comparison_result = left_value != right_value
                     result = ("state", "YES" if comparison_result else "NO")
                 except TypeError as e:
                     line = children[1].line if hasattr(children[1], 'line') else 0
@@ -577,19 +589,31 @@ class SemanticAnalyzer(Visitor):
                 result = ("unknown", None) 
             else:
                 try:
+                    # Convert state values to numeric for comparison
+                    left_value = left[1]
+                    right_value = right[1]
+                    
+                    # Convert state to numeric if one operand is numeric and the other is state
+                    if left[0] == "state" and right[0] in ["integer", "point"]:
+                        left_value = convert_state_to_int(left[1])
+                    elif right[0] == "state" and left[0] in ["integer", "point"]:
+                        right_value = convert_state_to_int(right[1])
+                    
                     if op == "<":
-                        comparison = left[1] < right[1]
+                        comparison = left_value < right_value
                     elif op == "<=":
-                        comparison = left[1] <= right[1]
+                        comparison = left_value <= right_value
                     elif op == ">":
-                        comparison = left[1] > right[1]
+                        comparison = left_value > right_value
                     elif op == ">=":
-                        comparison = left[1] >= right[1]
+                        comparison = left_value >= right_value
                     else:
                         self.errors.append(SemanticError(f"Unsupported relational operator '{op}'", line, column))
                         comparison = False
                     result = ("state", "YES" if comparison else "NO")
                 except TypeError as e:
+                    # If we get a TypeError, it might be due to incompatible types that couldn't
+                    # be automatically converted
                     self.errors.append(TypeMismatchError(
                         left[0], right[0], f"relational comparison ('{op}')", line, column))
                     result = ("unknown", None)
