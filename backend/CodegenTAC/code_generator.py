@@ -15,6 +15,7 @@ class TACGenerator(Visitor):
         self.values = {}
         self.debug_mode = debug_mode
         self.expression_depth = 0  # Track expression nesting depth
+        self.processed_expressions = {}  # Cache for processed expressions
     def push_loop(self, start_label, end_label):
         """Push a new loop context onto the stack."""
         self.loop_stack.append((start_label, end_label))
@@ -84,6 +85,7 @@ class TACGenerator(Visitor):
         self.label_counter = 0
         self.variable_types = {}
         self.values = {}
+        self.processed_expressions = {}  # Reset expression cache
         
         # Start traversal
         self.visit(tree)
@@ -203,12 +205,15 @@ class TACGenerator(Visitor):
                 if len(node.children[2].children) > 0:
                     init_expr_node = node.children[2].children[1]
                     get_prompt = None
+                    
+                    # Check for and process any parenthesized expressions first (PEMDAS)
+                    if self._contains_parenthesized_expr(init_expr_node):
+                        self._process_parenthesized_expr(init_expr_node)
+                    
                     if self._is_get_function_call(init_expr_node, get_prompt):
                         prompt = get_prompt if get_prompt else "Enter a value:"
-                        temp = self.get_temp()
-                        self.emit('INPUT', prompt, None, temp, 
-                                 *(source_pos if source_pos else (None, None)))
-                        self.emit('ASSIGN', temp, None, var_name,
+                        # For input, assign directly to variable without an intermediate temporary
+                        self.emit('INPUT', prompt, None, var_name, 
                                  *(source_pos if source_pos else (None, None)))
                         self.variable_types[var_name] = 'text'
                     else:
@@ -220,8 +225,6 @@ class TACGenerator(Visitor):
                         else:
                             self.emit('ASSIGN', init_expr, None, var_name,
                                      *(source_pos if source_pos else (None, None)))
-                            if isinstance(init_expr, str) and init_expr.startswith('t'):
-                                pass
             if len(node.children) > 3 and node.children[3]:
                 self.visit(node.children[3])
             return None
@@ -394,7 +397,10 @@ class TACGenerator(Visitor):
         5. Equality operators (== !=)
         6. Logical AND
         7. Logical OR (lowest)
+        
+        This implementation ensures operations are emitted in PEMDAS order.
         """
+        # Special case for get() function
         if hasattr(node.children[0], 'data') and node.children[0].data == 'id_usage':
             id_usage_node = node.children[0]
             if (len(id_usage_node.children) > 0 and 
@@ -422,26 +428,56 @@ class TACGenerator(Visitor):
                     self.emit('INPUT', prompt, None, temp)
                     return ('text', temp)
         
-        # Look for parenthesized expressions and prioritize them
-        for i, child in enumerate(node.children):
-            if hasattr(child, 'data') and child.data == 'primary_expr':
-                if len(child.children) > 1 and hasattr(child.children[0], 'type') and child.children[0].type == 'LPAREN':
-                    # This is a parenthesized expression, process it first
-                    if self.debug_mode:
-                        print(f"Prioritizing parenthesized expression in expression node")
-                    
-                    # Visit all children, but prioritize the parenthesized expression
-                    result = self.visit(node.children[0])
-                    return result
+        # Check for and prioritize parenthesized expressions first
+        for child in node.children:
+            if self._contains_parenthesized_expr(child):
+                # Process all parenthesized expressions first
+                self._process_parenthesized_expr(child)
         
-        # Process the expression following precedence rules by visiting the first child,
-        # which will be the highest-precedence expression according to the grammar hierarchy
-        result = self.visit(node.children[0])
-        return result
+        # Process the expression following precedence rules
+        return self.visit(node.children[0])
+        
+    def _contains_parenthesized_expr(self, node):
+        """Check if a node contains a parenthesized expression."""
+        if hasattr(node, 'data'):
+            if node.data == 'primary_expr':
+                if len(node.children) > 1 and hasattr(node.children[0], 'type') and node.children[0].type == 'LPAREN':
+                    return True
+            for child in node.children:
+                if self._contains_parenthesized_expr(child):
+                    return True
+        return False
+        
+    def _process_parenthesized_expr(self, node):
+        """Pre-process all parenthesized expressions to ensure they are evaluated first."""
+        if hasattr(node, 'data'):
+            if node.data == 'primary_expr':
+                if len(node.children) > 1 and hasattr(node.children[0], 'type') and node.children[0].type == 'LPAREN':
+                    # Generate a unique key for this node
+                    node_key = id(node)
+                    
+                    # Only process this node if we haven't seen it before
+                    if node_key not in self.processed_expressions:
+                        # Visit this parenthesized expression now
+                        result = self.visit(node)
+                        # Store the result for future use
+                        self.processed_expressions[node_key] = result
+                    return
+            for child in node.children:
+                self._process_parenthesized_expr(child)
     def visit_logical_or_expr(self, node):
+        node_key = id(node)
+        if node_key in self.processed_expressions:
+            if self.debug_mode:
+                print(f"Reusing cached result for logical_or_expr {node_key}")
+            return self.processed_expressions[node_key]
+            
         children = node.children
         if len(children) == 1:
-            return self.visit(children[0])
+            result = self.visit(children[0])
+            self.processed_expressions[node_key] = result
+            return result
+            
         left = self.visit(children[0])
         i = 1
         while i < len(children):
@@ -452,11 +488,22 @@ class TACGenerator(Visitor):
             self.emit('OR', left_operand, right_operand, temp)
             left = temp
             i += 2
+            
+        self.processed_expressions[node_key] = left
         return left
     def visit_logical_and_expr(self, node):
+        node_key = id(node)
+        if node_key in self.processed_expressions:
+            if self.debug_mode:
+                print(f"Reusing cached result for logical_and_expr {node_key}")
+            return self.processed_expressions[node_key]
+            
         children = node.children
         if len(children) == 1:
-            return self.visit(children[0])
+            result = self.visit(children[0])
+            self.processed_expressions[node_key] = result
+            return result
+            
         left = self.visit(children[0])
         i = 1
         while i < len(children):
@@ -467,11 +514,22 @@ class TACGenerator(Visitor):
             self.emit('AND', left_operand, right_operand, temp)
             left = temp
             i += 2
+            
+        self.processed_expressions[node_key] = left
         return left
     def visit_equality_expr(self, node):
+        node_key = id(node)
+        if node_key in self.processed_expressions:
+            if self.debug_mode:
+                print(f"Reusing cached result for equality_expr {node_key}")
+            return self.processed_expressions[node_key]
+            
         children = node.children
         if len(children) == 1:
-            return self.visit(children[0])
+            result = self.visit(children[0])
+            self.processed_expressions[node_key] = result
+            return result
+            
         left = self.visit(children[0])
         op = node.children[1].value
         right = self.visit(children[2])
@@ -482,11 +540,22 @@ class TACGenerator(Visitor):
             self.emit('EQ', left_operand, right_operand, temp)
         else:
             self.emit('NEQ', left_operand, right_operand, temp)
+            
+        self.processed_expressions[node_key] = temp
         return temp
     def visit_relational_expr(self, node):
+        node_key = id(node)
+        if node_key in self.processed_expressions:
+            if self.debug_mode:
+                print(f"Reusing cached result for relational_expr {node_key}")
+            return self.processed_expressions[node_key]
+            
         children = node.children
         if len(children) == 1:
-            return self.visit(children[0])
+            result = self.visit(children[0])
+            self.processed_expressions[node_key] = result
+            return result
+            
         left = self.visit(children[0])
         op = node.children[1].value
         right = self.visit(children[2])
@@ -501,6 +570,8 @@ class TACGenerator(Visitor):
             self.emit('GT', left_operand, right_operand, temp)
         else:
             self.emit('GE', left_operand, right_operand, temp)
+            
+        self.processed_expressions[node_key] = temp
         return temp
     def visit_add_expr(self, node):
         """
@@ -510,32 +581,47 @@ class TACGenerator(Visitor):
         children = node.children
         source_pos = self.get_source_position(node)
         
-        # First, look for and process any parenthesized expressions
-        for i, child in enumerate(children):
-            if i % 2 == 1:  # Skip operators
-                continue
-                
-            if hasattr(child, 'data') and child.data == 'primary_expr':
-                if len(child.children) > 1 and hasattr(child.children[0], 'type') and child.children[0].type == 'LPAREN':
-                    # Prioritize evaluating this parenthesized expression
-                    if self.debug_mode:
-                        print(f"Prioritizing parenthesized expression in add_expr")
-                    self.enter_expression()
-                    self.visit(child)
-                    self.exit_expression()
+        # Cache key to detect duplicate processing
+        node_key = id(node)
+        if node_key in self.processed_expressions:
+            if self.debug_mode:
+                print(f"Reusing cached result for add_expr {node_key}")
+            return self.processed_expressions[node_key]
         
-        # Now process the regular expression from left to right with precedence
-        left = self.visit(children[0])  # Visit left operand first (should be multiplication expression)
+        # If there's only one child, just process it and return
+        if len(children) == 1:
+            result = self.visit(children[0])
+            self.processed_expressions[node_key] = result
+            return result
+            
+        # PEMDAS implementation - first collect all sub-expressions
+        # Then evaluate multiplications before additions
+        operands = []
+        operators = []
         
-        i = 1
-        while i < len(children):
-            op = children[i].value  
-            right = self.visit(children[i+1])  # Visit right operand
+        # Gather all operands and operators
+        operands.append(children[0])  # First operand
+        for i in range(1, len(children), 2):
+            operators.append(children[i].value)  # Operator
+            operands.append(children[i+1])  # Next operand
+            
+        # First, process all operands, which might contain multiplication expressions
+        # or parenthesized expressions that should be evaluated first
+        processed_operands = []
+        for operand in operands:
+            processed_operands.append(self.visit(operand))
+            
+        # Now generate the TAC instructions in the correct order
+        left = processed_operands[0]
+        
+        for i in range(len(operators)):
+            op = operators[i]
+            right = processed_operands[i+1]
             
             # Create a temporary for this operation
             temp = self.get_temp()
             
-            # Resolve operands, ensuring temporaries from parenthesized expressions are used directly
+            # Resolve operands
             left_operand = left[1] if isinstance(left, tuple) else left
             right_operand = right[1] if isinstance(right, tuple) else right
             
@@ -558,7 +644,7 @@ class TACGenerator(Visitor):
                         self.variable_types[temp] = "point"
                     else:
                         self.variable_types[temp] = "integer"
-            else:  
+            else:  # Subtraction
                 if left_type == "text" or right_type == "text" or left_type == "list" or right_type == "list":
                     self.emit('ERROR', "Cannot subtract from text or list", None, temp,
                              *(source_pos if source_pos else (None, None)))
@@ -571,44 +657,60 @@ class TACGenerator(Visitor):
                         self.variable_types[temp] = "integer"
             
             left = temp
-            i += 2
-            
+        
+        # Cache the result for future use
+        self.processed_expressions[node_key] = left
         return left
     def visit_mul_expr(self, node):
         """
         Process multiplication/division expressions. Multiplication has higher precedence than addition,
         so these expressions are evaluated before addition/subtraction.
+        
+        Ensures operations are emitted in PEMDAS order.
         """
         children = node.children
         source_pos = self.get_source_position(node)
         
-        # First, look for and process any parenthesized expressions
-        for i, child in enumerate(children):
-            if i % 2 == 1:  # Skip operators
-                continue
-                
-            if hasattr(child, 'data') and child.data == 'primary_expr':
-                if len(child.children) > 1 and hasattr(child.children[0], 'type') and child.children[0].type == 'LPAREN':
-                    # Prioritize evaluating this parenthesized expression
-                    if self.debug_mode:
-                        print(f"Prioritizing parenthesized expression in mul_expr")
-                    self.enter_expression()
-                    self.visit(child)
-                    self.exit_expression()
+        # Cache key to detect duplicate processing
+        node_key = id(node)
+        if node_key in self.processed_expressions:
+            if self.debug_mode:
+                print(f"Reusing cached result for mul_expr {node_key}")
+            return self.processed_expressions[node_key]
         
-        # Visit the leftmost operand first (which could be a primary expression)
-        left = self.visit(children[0])
+        # If there's only one child, just process it and return
+        if len(children) == 1:
+            result = self.visit(children[0])
+            self.processed_expressions[node_key] = result
+            return result
         
-        i = 1
-        while i < len(children):
-            op = children[i].value
-            # Visit each right operand (which could be primary expressions)
-            right = self.visit(children[i+1])
+        # PEMDAS implementation - collect all sub-expressions first
+        operands = []
+        operators = []
+        
+        # Gather all operands and operators
+        operands.append(children[0])  # First operand
+        for i in range(1, len(children), 2):
+            operators.append(children[i].value)  # Operator
+            operands.append(children[i+1])  # Next operand
+            
+        # First, process all operands to handle parenthesized expressions
+        # This ensures parentheses are always evaluated first (P in PEMDAS)
+        processed_operands = []
+        for operand in operands:
+            processed_operands.append(self.visit(operand))
+            
+        # Now generate the TAC instructions
+        left = processed_operands[0]
+        
+        for i in range(len(operators)):
+            op = operators[i]
+            right = processed_operands[i+1]
             
             # Create a temporary for this operation
             temp = self.get_temp()
             
-            # Resolve operands, ensuring temporaries from parenthesized expressions are used directly
+            # Resolve operands
             left_operand = left[1] if isinstance(left, tuple) else left
             right_operand = right[1] if isinstance(right, tuple) else right
             
@@ -626,7 +728,7 @@ class TACGenerator(Visitor):
                     self.emit('DIV', left_operand, right_operand, temp,
                              *(source_pos if source_pos else (None, None)))
                     self.variable_types[temp] = "point"
-                else:  
+                else:  # Modulo
                     self.emit('MOD', left_operand, right_operand, temp,
                              *(source_pos if source_pos else (None, None)))
                 
@@ -637,8 +739,9 @@ class TACGenerator(Visitor):
                     self.variable_types[temp] = "integer"
             
             left = temp
-            i += 2
-            
+        
+        # Cache the result for future use
+        self.processed_expressions[node_key] = left
         return left
     def visit_pre_expr(self, node):
         children = node.children
@@ -669,41 +772,40 @@ class TACGenerator(Visitor):
             return self.visit(node.children[0])
         else:
             # This is a parenthesized expression (LPAREN expression RPAREN)
+            # Check if we've already processed this exact node
+            node_key = id(node)
+            if node_key in self.processed_expressions:
+                if self.debug_mode:
+                    print(f"Reusing cached result for parenthesized expression {node_key}")
+                return self.processed_expressions[node_key]
+            
             if self.debug_mode:
                 print(f"Processing parenthesized expression at depth {getattr(node, 'depth', 'unknown')}")
             
             # Track entry into parenthesized expression
-            depth = self.enter_expression()
+            self.enter_expression()
             if self.debug_mode:
-                print(f"Entered parenthesized expression at depth {depth}")
+                print(f"Entered parenthesized expression at depth {self.expression_depth}")
             
-            # Get source position for error tracking
-            source_pos = self.get_source_position(node)
+            # For PEMDAS, ensure all expressions inside parentheses are evaluated completely first
+            for child in node.children:
+                if hasattr(child, 'data') and child.data == 'expression':
+                    # Check for and prioritize any nested parenthesized expressions
+                    for subchild in child.children:
+                        if self._contains_parenthesized_expr(subchild):
+                            self._process_parenthesized_expr(subchild)
             
-            # First, evaluate the inner expression and ensure a temporary is created
-            # to make the parenthesized computation explicit in the TAC output
+            # Now evaluate the inner expression
             expr_result = self.visit(node.children[1])
             
             # Exit from parenthesized expression
             self.exit_expression()
             
-            # Always create a new temporary for parenthesized expressions
-            # to ensure they are evaluated completely before being used
-            temp = self.get_temp()
-            value = expr_result[1] if isinstance(expr_result, tuple) else expr_result
-            self.emit('ASSIGN', value, None, temp, 
-                     *(source_pos if source_pos else (None, None)))
+            # Cache the result for future use
+            self.processed_expressions[node_key] = expr_result
             
-            # Ensure this temporary has proper type information
-            if isinstance(expr_result, tuple) and expr_result[0] in ('integer', 'float', 'point', 'bool', 'text'):
-                self.variable_types[temp] = expr_result[0]
-            elif isinstance(expr_result, str) and expr_result in self.variable_types:
-                self.variable_types[temp] = self.variable_types[expr_result]
-                
-            if self.debug_mode:
-                print(f"Exited parenthesized expression, created temporary {temp}")
-                
-            return temp
+            # Return the expression result directly
+            return expr_result
     def visit_operand(self, node):
         if (hasattr(node.children[0], 'type') and node.children[0].type == 'GET' and
                 len(node.children) >= 4 and  
@@ -984,7 +1086,6 @@ class TACGenerator(Visitor):
                 self.emit('ASSIGN', var_name, None, temp,
                          *(source_pos if source_pos else (None, None)))
                 rhs = expr_val[1] if isinstance(expr_val, tuple) else expr_val
-                result_temp = self.get_temp()
                 var_type = self.get_type(var_name)
                 expr_type = expr_val[0] if isinstance(expr_val, tuple) else self.get_type(expr_val)
                 if op == '+=':
@@ -993,39 +1094,34 @@ class TACGenerator(Visitor):
                                  *(source_pos if source_pos else (None, None)))
                         return None
                     elif var_type == "text" or expr_type == "text":
-                        self.emit('CONCAT', temp, rhs, result_temp,
+                        self.emit('CONCAT', temp, rhs, var_name,
                                  *(source_pos if source_pos else (None, None)))
-                        self.variable_types[result_temp] = "text"
+                        self.variable_types[var_name] = "text"
                     else:
-                        self.emit('ADD', temp, rhs, result_temp,
+                        self.emit('ADD', temp, rhs, var_name,
                                  *(source_pos if source_pos else (None, None)))
                         if var_type == "point" or expr_type == "point" or var_type == "float" or expr_type == "float":
-                            self.variable_types[result_temp] = "point"
+                            self.variable_types[var_name] = "point"
                         else:
-                            self.variable_types[result_temp] = "integer"
+                            self.variable_types[var_name] = "integer"
                 elif op == '-=':
-                    self.emit('SUB', temp, rhs, result_temp,
+                    self.emit('SUB', temp, rhs, var_name,
                              *(source_pos if source_pos else (None, None)))
                     if var_type == "point" or expr_type == "point" or var_type == "float" or expr_type == "float":
-                        self.variable_types[result_temp] = "point"
+                        self.variable_types[var_name] = "point"
                     else:
-                        self.variable_types[result_temp] = "integer"
+                        self.variable_types[var_name] = "integer"
                 elif op == '*=':
-                    self.emit('MUL', temp, rhs, result_temp,
+                    self.emit('MUL', temp, rhs, var_name,
                              *(source_pos if source_pos else (None, None)))
                     if var_type == "point" or expr_type == "point" or var_type == "float" or expr_type == "float":
-                        self.variable_types[result_temp] = "point"
+                        self.variable_types[var_name] = "point"
                     else:
-                        self.variable_types[result_temp] = "integer"
+                        self.variable_types[var_name] = "integer"
                 elif op == '/=':
-                    self.emit('DIV', temp, rhs, result_temp,
+                    self.emit('DIV', temp, rhs, var_name,
                              *(source_pos if source_pos else (None, None)))
-                    self.variable_types[result_temp] = "point"
-                if not (op == '+=' and (var_type == "list" or expr_type == "list")):
-                    self.emit('ASSIGN', result_temp, None, var_name,
-                             *(source_pos if source_pos else (None, None)))
-                    if result_temp in self.variable_types:
-                        self.variable_types[var_name] = self.variable_types[result_temp]
+                    self.variable_types[var_name] = "point"
         return None
     def visit_show_statement(self, node):
         """
