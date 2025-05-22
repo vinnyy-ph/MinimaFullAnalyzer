@@ -4,14 +4,21 @@ class LexerError:
         self.line = line
         self.column = column
         self.category = category
+        self.is_warning = False  # Flag to distinguish errors from warnings
 
     def to_dict(self):
         return {
             'message': self.message,
             'line': self.line,
             'column': self.column,
-            'category': self.category
+            'category': self.category,
+            'is_warning': self.is_warning
         }
+
+class LexerWarning(LexerError):
+    def __init__(self, message, line, column, category="Style Warning"):
+        super().__init__(message, line, column, category)
+        self.is_warning = True  # Mark as a warning, not an error
 
 # specific error categories
 class InvalidIdentifierError(LexerError):

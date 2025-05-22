@@ -20,14 +20,25 @@ def analyze_full():
         all_tokens = lexer.tokenize_all()
         tokens = []
         for token in all_tokens:
-            tokens.append({
+            token_info = {
                 'type': token.type, # could be IDENTIFIER, INTEGERLITERAL, etc.
                 'value': token.value, # the actual value of the token, examples are x, 123, etc.
                 'line': token.line, # the line number where the token was found
                 'column': token.column # the column number where the token was found
-            })
+            }
+            if token.warning:
+                token_info['warning'] = token.warning
+            tokens.append(token_info)
         
-        lexical_errors = [error.to_dict() for error in lexer.errors]
+        # Split warnings from errors
+        lexical_errors = []
+        lexical_warnings = []
+        for issue in lexer.errors:
+            if hasattr(issue, 'is_warning') and issue.is_warning:
+                lexical_warnings.append(issue.to_dict())
+            else:
+                lexical_errors.append(issue.to_dict())
+        
         syntax_errors = []
         semantic_errors  = []
         if not lexical_errors: #if lexical_errors dictionary is empty, continue with syntax analysis
@@ -56,6 +67,7 @@ def analyze_full():
     return jsonify({
         'tokens': tokens,
         'lexicalErrors': lexical_errors,
+        'lexicalWarnings': lexical_warnings,
         'syntaxErrors': syntax_errors,
         'semanticErrors': semantic_errors,
         'terminalOutput': terminal_output
@@ -75,7 +87,9 @@ def get_symbol_table():
         # First check for lexical errors
         lexer = Lexer(code)
         all_tokens = lexer.tokenize_all()
-        lexical_errors = lexer.errors
+        
+        # Filter out warnings from actual errors
+        lexical_errors = [error for error in lexer.errors if not (hasattr(error, 'is_warning') and error.is_warning)]
         
         if lexical_errors:
             return jsonify({
@@ -217,7 +231,9 @@ def get_ast():
         # First check for lexical errors
         lexer = Lexer(code)
         all_tokens = lexer.tokenize_all()
-        lexical_errors = lexer.errors
+        
+        # Filter out warnings from actual errors
+        lexical_errors = [error for error in lexer.errors if not (hasattr(error, 'is_warning') and error.is_warning)]
         
         if lexical_errors:
             return jsonify({
