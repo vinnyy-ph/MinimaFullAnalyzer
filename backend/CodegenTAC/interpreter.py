@@ -37,7 +37,7 @@ class TACInterpreter:
             value = int(value)
         if isinstance(value, int):
             if value < self.min_number or value > self.max_number:
-                raise ValueError(f"Integer out of range: {value}. Valid range is {self.min_number} to {self.max_number}")
+                raise ValueError(f"Integer out of range. Valid range is {self.min_number} to {self.max_number}")
         elif isinstance(value, float):
             # Get the exact string representation of the value
             str_val = f"{value}"
@@ -414,8 +414,19 @@ class TACInterpreter:
     def validate_and_parse_input(self, input_str, expected_type=None):
         """Validates input string based on Minima rules and optional expected type."""
         original_input_str = input_str
-        # No need to convert - to ~ as we're now using - for negative numbers
         
+        # If input is empty or None, handle it specially
+        if input_str is None or input_str.strip() == '':
+            if expected_type == 'integer' or expected_type == 'point':
+                raise ValueError(f"Empty input cannot be converted to {expected_type}")
+            elif expected_type == 'state':
+                return False  # Empty input as state is FALSE
+            elif expected_type == 'text':
+                return ""     # Empty input as text is empty string
+            else:
+                return ""     # Default for empty input is empty string
+        
+        # Check if potentially numeric for later validation
         is_potentially_numeric = False
         cleaned_num_str = input_str.replace('-', '', 1) if input_str.startswith('-') else input_str
         try:
@@ -427,30 +438,51 @@ class TACInterpreter:
         if expected_type:
             try:
                 if expected_type == 'integer':
+                    # For integer, check for non-numeric characters or decimal points
                     if '.' in cleaned_num_str or 'e' in cleaned_num_str.lower():
-                        raise ValueError("Invalid format for integer input.")
+                        raise ValueError("Invalid format for integer input - no decimal points allowed.")
+                    # Ensure all characters are digits (except possibly a leading minus)
                     if not cleaned_num_str.isdigit():
-                        raise ValueError("Invalid characters for integer input.")
+                        raise ValueError("Invalid characters in integer input - only digits allowed.")
                     numeric_value = -int(cleaned_num_str) if input_str.startswith('-') else int(cleaned_num_str)
                     return self.validate_number(numeric_value)
+                    
                 elif expected_type == 'point':
+                    # For floating point, ensure it's a valid number format
                     if not is_potentially_numeric:
-                        raise ValueError("Invalid format for point input.")
-                    numeric_value = -float(cleaned_num_str) if input_str.startswith('-') else float(cleaned_num_str)
-                    return self.validate_number(numeric_value)
+                        raise ValueError("Invalid format for point input - not a valid number.")
+                    try:
+                        if input_str.startswith('-'):
+                            numeric_value = -float(cleaned_num_str)
+                        else:
+                            numeric_value = float(cleaned_num_str)
+                        return self.validate_number(numeric_value)
+                    except ValueError:
+                        raise ValueError("Cannot convert input to point value.")
+                        
                 elif expected_type == 'state':
-                    upper_val = input_str.upper()
-                    if upper_val in ['YES', 'TRUE', '1']: return True
-                    elif upper_val in ['NO', 'FALSE', '0']: return False
+                    # For boolean state, check if it's a recognized value
+                    upper_val = input_str.upper().strip()
+                    if upper_val in ['YES', 'TRUE', '1']: 
+                        return True
+                    elif upper_val in ['NO', 'FALSE', '0']: 
+                        return False
                     else:
                         raise ValueError("Invalid state value. Expected YES, NO, TRUE, FALSE, 0, or 1.")
+                        
                 elif expected_type == 'text':
+                    # Text type accepts any input
                     return input_str
+                    
                 else:
+                    # Unknown type - just return the input
                     return input_str
+                    
             except ValueError as e:
                 raise ValueError(f"Input '{original_input_str}' is not a valid {expected_type}: {str(e)}")
+                
         else:
+            # Auto-detect type if no expected_type is specified
             if is_potentially_numeric:
                 try:
                     if '.' in cleaned_num_str or 'e' in cleaned_num_str.lower():
@@ -462,9 +494,11 @@ class TACInterpreter:
                 except ValueError as e:
                     raise ValueError(f"Numeric input '{original_input_str}' validation failed: {str(e)}")
             else:
-                upper_val = input_str.upper()
+                # Check for boolean values
+                upper_val = input_str.upper().strip()
                 if upper_val == 'YES': return True
                 if upper_val == 'NO': return False
+                # Default to text for non-numeric, non-boolean input
                 return input_str
 
     def evaluate_condition(self, value):
@@ -636,7 +670,21 @@ class TACInterpreter:
                             return 1 if val else 0
                         if val is None:
                             return 0
-                        raise TypeError(f"Cannot convert {val} (type {type(val).__name__}) to number for addition")
+                        if isinstance(val, str):
+                            # Try to convert strings to numbers
+                            if val.upper() in ["YES", "TRUE"]:
+                                return 1
+                            elif val.upper() in ["NO", "FALSE", "EMPTY", ""]:
+                                return 0
+                            try:
+                                # Handle negatives with hyphen notation
+                                if val.startswith('-'):
+                                    return -float(val[1:]) if '.' in val else -int(val[1:])
+                                return float(val) if '.' in val else int(val)
+                            except ValueError:
+                                # If string can't be converted to number, explicitly throw error
+                                raise TypeError(f"Cannot convert string '{val}' to a number")
+                        raise TypeError(f"Cannot convert {val} (type {type(val).__name__}) to number for arithmetic operation")
                     
                     left_num = to_num(left_val)
                     right_num = to_num(right_val)
@@ -646,76 +694,195 @@ class TACInterpreter:
                     if "out of range" in str(e) or "too many digits" in str(e):
                         raise e
                     else:
-                        raise TypeError(f"Error during numeric addition for '{arg1}' ({type(left_val).__name__}) and '{arg2}' ({type(right_val).__name__}): {e}")
+                        raise TypeError(f"Error during numeric addition: Cannot add {left_val} ({type(left_val).__name__}) and {right_val} ({type(right_val).__name__}): {e}")
                         
         # Subtraction
         elif op == 'SUB':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
             try:
-                num_l = left_val if isinstance(left_val, (int, float)) else 0
-                num_r = right_val if isinstance(right_val, (int, float)) else 0
-                computed_result = num_l - num_r
+                # Use the same to_num function defined in the ADD operation
+                if isinstance(left_val, (str, list)) or isinstance(right_val, (str, list)):
+                    raise TypeError(f"Cannot subtract {type(right_val).__name__} from {type(left_val).__name__}")
+                
+                def to_num(val):
+                    if isinstance(val, (int, float)):
+                        return val
+                    if isinstance(val, bool):
+                        return 1 if val else 0
+                    if val is None:
+                        return 0
+                    if isinstance(val, str):
+                        # Try to convert strings to numbers
+                        if val.upper() in ["YES", "TRUE"]:
+                            return 1
+                        elif val.upper() in ["NO", "FALSE", "EMPTY", ""]:
+                            return 0
+                        try:
+                            # Handle negatives with hyphen notation
+                            if val.startswith('-'):
+                                return -float(val[1:]) if '.' in val else -int(val[1:])
+                            return float(val) if '.' in val else int(val)
+                        except ValueError:
+                            # If string can't be converted to number, explicitly throw error
+                            raise TypeError(f"Cannot convert string '{val}' to a number")
+                    raise TypeError(f"Cannot convert {val} (type {type(val).__name__}) to number for arithmetic operation")
+                
+                left_num = to_num(left_val)
+                right_num = to_num(right_val)
+                computed_result = left_num - right_num
                 self.assign_variable(result, self.validate_number(computed_result))
             except (ValueError, TypeError) as e:
                 if "out of range" in str(e) or "too many digits" in str(e):
                     raise e
-                raise ValueError(f"Cannot subtract values: {left_val} - {right_val}: {e}")
+                raise TypeError(f"Error during numeric subtraction: Cannot subtract {right_val} ({type(right_val).__name__}) from {left_val} ({type(left_val).__name__}): {e}")
                 
         # Multiplication
         elif op == 'MUL':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
             try:
-                # Try numeric multiplication first
-                if isinstance(left_val, (int, float)) and isinstance(right_val, (int, float)):
-                    computed_result = left_val * right_val
+                # Handle special cases for string repetition
+                if isinstance(left_val, str) and isinstance(right_val, int) and right_val >= 0:
+                    self.assign_variable(result, left_val * right_val)
+                    return
+                elif isinstance(left_val, int) and left_val >= 0 and isinstance(right_val, str):
+                    self.assign_variable(result, left_val * right_val)
+                    return
+                
+                # Use the same to_num function for numeric multiplication
+                def to_num(val):
+                    if isinstance(val, (int, float)):
+                        return val
+                    if isinstance(val, bool):
+                        return 1 if val else 0
+                    if val is None:
+                        return 0
+                    if isinstance(val, str):
+                        # Try to convert strings to numbers
+                        if val.upper() in ["YES", "TRUE"]:
+                            return 1
+                        elif val.upper() in ["NO", "FALSE", "EMPTY", ""]:
+                            return 0
+                        try:
+                            # Handle negatives with hyphen notation
+                            if val.startswith('-'):
+                                return -float(val[1:]) if '.' in val else -int(val[1:])
+                            return float(val) if '.' in val else int(val)
+                        except ValueError:
+                            # If string can't be converted to number, explicitly throw error
+                            raise TypeError(f"Cannot convert string '{val}' to a number")
+                    raise TypeError(f"Cannot convert {val} (type {type(val).__name__}) to number for arithmetic operation")
+                
+                try:
+                    left_num = to_num(left_val)
+                    right_num = to_num(right_val)
+                    computed_result = left_num * right_num
                     self.assign_variable(result, self.validate_number(computed_result))
-                # Handle string repetition
-                elif isinstance(left_val, str) and isinstance(right_val, int):
-                    self.assign_variable(result, left_val * right_val)
-                elif isinstance(left_val, int) and isinstance(right_val, str):
-                    self.assign_variable(result, left_val * right_val)
-                else:
-                    raise TypeError(f"Cannot multiply values of types {type(left_val).__name__} and {type(right_val).__name__}")
+                except TypeError:
+                    # If we can't convert to numbers, check for special string repetition cases first
+                    if (isinstance(left_val, str) and not isinstance(right_val, (int, float))) or \
+                       (isinstance(right_val, str) and not isinstance(left_val, (int, float))):
+                        raise TypeError(f"String repetition requires an integer count, got {type(left_val).__name__} and {type(right_val).__name__}")
+                    else:
+                        raise TypeError(f"Cannot multiply values of types {type(left_val).__name__} and {type(right_val).__name__}")
+                
             except (ValueError, TypeError) as e:
                 if "out of range" in str(e) or "too many digits" in str(e):
                     raise e
-                raise ValueError(f"Cannot multiply values: {left_val} * {right_val}: {e}")
+                raise TypeError(f"Error during multiplication: Cannot multiply {left_val} ({type(left_val).__name__}) and {right_val} ({type(right_val).__name__}): {e}")
                 
         # Division
         elif op == 'DIV':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
             try:
-                num_l = float(left_val) if isinstance(left_val, (int, float)) else 0.0
-                num_r = float(right_val) if isinstance(right_val, (int, float)) else 1.0
-                if num_r == 0:
+                # Use the same to_num function for numeric division
+                def to_num(val):
+                    if isinstance(val, (int, float)):
+                        return val
+                    if isinstance(val, bool):
+                        return 1 if val else 0
+                    if val is None:
+                        return 0
+                    if isinstance(val, str):
+                        # Try to convert strings to numbers
+                        if val.upper() in ["YES", "TRUE"]:
+                            return 1
+                        elif val.upper() in ["NO", "FALSE", "EMPTY", ""]:
+                            return 0
+                        try:
+                            # Handle negatives with hyphen notation
+                            if val.startswith('-'):
+                                return -float(val[1:]) if '.' in val else -int(val[1:])
+                            return float(val) if '.' in val else int(val)
+                        except ValueError:
+                            # If string can't be converted to number, explicitly throw error
+                            raise TypeError(f"Cannot convert string '{val}' to a number")
+                    raise TypeError(f"Cannot convert {val} (type {type(val).__name__}) to number for arithmetic operation")
+                
+                left_num = to_num(left_val)
+                right_num = to_num(right_val)
+                
+                # Check for division by zero
+                if right_num == 0:
                     raise ValueError("Division by zero")
-                computed_result = num_l / num_r
+                    
+                computed_result = left_num / right_num
                 self.assign_variable(result, self.validate_number(computed_result))
+                
             except (ValueError, TypeError) as e:
                 if "Division by zero" in str(e):
                     raise ValueError("Division by zero")
                 if "out of range" in str(e) or "too many digits" in str(e):
                     raise e
-                raise ValueError(f"Cannot perform division on non-numeric values: {left_val} / {right_val}: {e}")
+                raise TypeError(f"Error during division: Cannot divide {left_val} ({type(left_val).__name__}) by {right_val} ({type(right_val).__name__}): {e}")
                 
         # Modulo
         elif op == 'MOD':
             left_val = self.resolve_variable(arg1)
             right_val = self.resolve_variable(arg2)
             try:
-                if not isinstance(left_val, (int, float)):
-                    raise ValueError(f"Cannot perform modulo: left operand '{left_val}' is not a number")
-                if not isinstance(right_val, (int, float)):
-                    raise ValueError(f"Cannot perform modulo: right operand '{right_val}' is not a number")
-                if right_val == 0:
+                # Use the same to_num function as other operations
+                def to_num(val):
+                    if isinstance(val, (int, float)):
+                        return val
+                    if isinstance(val, bool):
+                        return 1 if val else 0
+                    if val is None:
+                        return 0
+                    if isinstance(val, str):
+                        # Try to convert strings to numbers
+                        if val.upper() in ["YES", "TRUE"]:
+                            return 1
+                        elif val.upper() in ["NO", "FALSE", "EMPTY", ""]:
+                            return 0
+                        try:
+                            # Handle negatives with hyphen notation
+                            if val.startswith('-'):
+                                return -float(val[1:]) if '.' in val else -int(val[1:])
+                            return float(val) if '.' in val else int(val)
+                        except ValueError:
+                            # If string can't be converted to number, explicitly throw error
+                            raise TypeError(f"Cannot convert string '{val}' to a number")
+                    raise TypeError(f"Cannot convert {val} (type {type(val).__name__}) to number for arithmetic operation")
+                
+                left_num = to_num(left_val)
+                right_num = to_num(right_val)
+                
+                # Check for modulo by zero
+                if right_num == 0:
                     raise ValueError("Modulo by zero")
-                computed_result = left_val % right_val
+                    
+                computed_result = left_num % right_num
                 self.assign_variable(result, self.validate_number(computed_result))
+                
             except (ValueError, TypeError) as e:
-                raise ValueError(f"Error in modulo operation: {e}")
+                if "Modulo by zero" in str(e):
+                    raise ValueError("Modulo by zero")
+                if "out of range" in str(e) or "too many digits" in str(e):
+                    raise e
+                raise TypeError(f"Error during modulo operation: Cannot compute {left_val} ({type(left_val).__name__}) % {right_val} ({type(right_val).__name__}): {e}")
                 
         # Negation
         elif op == 'NEG':
@@ -1057,7 +1224,13 @@ class TACInterpreter:
                     if isinstance(val, (int, float)):
                         casted_value = (val != 0)
                     elif isinstance(val, str):
-                        casted_value = (val.upper() not in ["", "0", "NO", "FALSE", "EMPTY"])
+                        upper_val = val.upper()
+                        if upper_val in ["YES", "TRUE", "1"]:
+                            casted_value = True
+                        elif upper_val in ["NO", "FALSE", "0", "", "EMPTY"]:
+                            casted_value = False
+                        else:
+                            raise ValueError(f"Cannot convert '{val}' to state, expected YES, NO, TRUE, FALSE, 1, or 0")
                     elif isinstance(val, list):
                         casted_value = bool(val)
                     elif val is None:
@@ -1065,13 +1238,15 @@ class TACInterpreter:
                     else:
                         casted_value = bool(val)
             except (ValueError, TypeError) as e:
-                if self.debug_mode:
-                    print(f"Warning: Typecast failed for {val} to {target_type}: {e}")
-                if target_type == 'integer': casted_value = 0
-                elif target_type == 'point': casted_value = 0.0
-                elif target_type == 'text': casted_value = str(val)
-                elif target_type == 'state': casted_value = False
-                else: casted_value = val
+                if target_type in ['integer', 'point']:
+                    # For numeric conversions, raise an error when conversion fails
+                    raise ValueError(f"Cannot convert '{val}' to {target_type}: {e}")
+                else:
+                    if self.debug_mode:
+                        print(f"Warning: Typecast failed for {val} to {target_type}: {e}")
+                    if target_type == 'text': casted_value = str(val)
+                    elif target_type == 'state': casted_value = False
+                    else: casted_value = val
                 
             self.assign_variable(result, casted_value)
             
@@ -1116,7 +1291,7 @@ class TACInterpreter:
         elif op == 'LIST_ACCESS':
             list_var = self.resolve_variable(arg1)
             index_raw = arg2
-            access_result = None  # Default to None if access fails
+            access_result = None
             
             try:
                 index = self.resolve_variable(index_raw)
@@ -1130,18 +1305,16 @@ class TACInterpreter:
                 except (ValueError, TypeError):
                     raise ValueError(f"Invalid index type: {type(index).__name__} ({index})")
                     
-                if isinstance(list_var, (list, str)):
-                    actual_index = index_int
-                    if index_int < 0:
-                        actual_index = len(list_var) + index_int
-                    if 0 <= actual_index < len(list_var):
-                        access_result = list_var[actual_index]
-                    else:
-                        if self.debug_mode:
-                            print(f"Index {index_int} (actual: {actual_index}) out of range for {type(list_var).__name__} of length {len(list_var)}")
+                if not isinstance(list_var, (list, str)):
+                    raise ValueError(f"Cannot access index on non-list/non-string: {type(list_var).__name__}")
+                
+                actual_index = index_int
+                if index_int < 0:
+                    actual_index = len(list_var) + index_int
+                if 0 <= actual_index < len(list_var):
+                    access_result = list_var[actual_index]
                 else:
-                    if self.debug_mode:
-                        print(f"Warning: Attempted LIST_ACCESS on non-list/non-string: {type(list_var).__name__}")
+                    raise ValueError(f"Index {index_int} out of range for {type(list_var).__name__} of length {len(list_var)}")
             except Exception as e:
                 raise ValueError(f"Error during LIST_ACCESS for '{arg1}' at index '{index_raw}': {e}")
                 
