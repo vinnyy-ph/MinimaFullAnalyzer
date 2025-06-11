@@ -16,7 +16,7 @@ allowed_origins = [
     "http://localhost:3000",           # Local development
     "http://127.0.0.1:3000",          # Local development alternative
     "https://*.vercel.app",            # Any Vercel deployment
-    "https://minima-frontend-steel.vercel.app"  
+    "https://minima-tau.vercel.app"  
 ]
 
 CORS(app, origins=allowed_origins, supports_credentials=True)
