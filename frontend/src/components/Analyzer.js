@@ -5,6 +5,7 @@ import OutputTable from './OutputTable';
 import Errors from './Errors';
 import CodeOutput from './CodeOutput';
 import axios from 'axios';
+import { API_BASE_URL } from '../config/api';
 import logo from '../assets/logomnm.png'; 
 import Sidebar from './Sidebar';
 import { 
@@ -272,7 +273,7 @@ const Analyzer = ({ toggleSidebar: parentToggleSidebar, themeMode, toggleTheme }
 
   const handleAnalyze = () => {
     setLoading(true);
-    axios.post('http://localhost:5000/analyze_full', { code })
+    axios.post(`${API_BASE_URL}/analyze_full`, { code })
     .then((response) => {
       const data = response.data;
       setTokens(data.tokens);
@@ -321,7 +322,7 @@ const Analyzer = ({ toggleSidebar: parentToggleSidebar, themeMode, toggleTheme }
     // match to the Program Output tab when executing
     setRightPanelTab(1);
     
-    axios.post('http://localhost:5000/executeCode', { code })
+    axios.post(`${API_BASE_URL}/executeCode`, { code })
       .then((response) => {
         const data = response.data;
         console.log("Execute response:", data);
@@ -396,7 +397,7 @@ const Analyzer = ({ toggleSidebar: parentToggleSidebar, themeMode, toggleTheme }
     console.log(`Submitting input: '${userInput}' for execution ${executionId}`);
     
     // Send the input back to the server
-    axios.post('http://localhost:5000/executeCode', {
+    axios.post(`${API_BASE_URL}/executeCode`, {
       // Send code again if backend needs it for context, otherwise remove
       // code,
       executionId,
@@ -514,7 +515,7 @@ const Analyzer = ({ toggleSidebar: parentToggleSidebar, themeMode, toggleTheme }
     setAstLoading(true);
     setAstError(null);
     
-    axios.post('http://localhost:5000/getAST', { code })
+    axios.post(`${API_BASE_URL}/getAST`, { code })
       .then((response) => {
         const data = response.data;
         if (data.success) {
@@ -537,7 +538,7 @@ const Analyzer = ({ toggleSidebar: parentToggleSidebar, themeMode, toggleTheme }
     setSymbolTableLoading(true);
     setSymbolTableError(null);
     
-    axios.post('http://localhost:5000/getSymbolTable', { code })
+    axios.post(`${API_BASE_URL}/getSymbolTable`, { code })
       .then((response) => {
         const data = response.data;
         if (data.success) {

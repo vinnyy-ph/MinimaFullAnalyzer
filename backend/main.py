@@ -8,9 +8,21 @@ from backend.CodegenTAC.code_executor import execute_code, format_tac_instructio
 from backend.CodegenTAC.built_in_functions import MinimaBultins
 import io
 from contextlib import redirect_stdout
+
 app = Flask(__name__)
-CORS(app)
+
+# Configure CORS to allow requests from both localhost and Vercel
+allowed_origins = [
+    "http://localhost:3000",           # Local development
+    "http://127.0.0.1:3000",          # Local development alternative
+    "https://*.vercel.app",            # Any Vercel deployment
+    "https://minima-frontend-steel.vercel.app"  
+]
+
+CORS(app, origins=allowed_origins, supports_credentials=True)
+
 execution_states = {} #debugging purposes
+
 @app.route('/analyze_full', methods=['POST'])
 def analyze_full():
     data = request.get_json()
@@ -74,6 +86,7 @@ def analyze_full():
         'semanticErrors': semantic_errors,
         'terminalOutput': terminal_output
     })
+
 @app.route('/getSymbolTable', methods=['POST'])
 def get_symbol_table():
     data = request.get_json()
@@ -218,6 +231,7 @@ def get_symbol_table():
             'success': False,
             'error': f'Error generating symbol table: {str(e)}'
         })
+
 @app.route('/getAST', methods=['POST'])
 def get_ast():
     data = request.get_json()
@@ -277,6 +291,7 @@ def get_ast():
             'success': False,
             'error': f'Error generating AST: {str(e)}'
         })
+
 @app.route('/executeCode', methods=['POST'])
 def execute_code_route():
     data = request.json
@@ -297,11 +312,13 @@ def execute_code_route():
     if result.get('tac'):  
         result['formattedTAC'] = format_tac_instructions(result['tac'])
     return jsonify(result)
+
 @app.route('/api/builtin-functions', methods=['GET'])
 def get_builtin_functions():
     """Return the list of built-in function names for the editor highlighting"""
     builtin_functions = list(MinimaBultins.BUILTIN_FUNCTIONS.keys())
     return jsonify(builtin_functions)
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)

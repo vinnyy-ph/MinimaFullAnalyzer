@@ -1,16 +1,13 @@
 // Utility to fetch and cache built-in functions
+import { API_BASE_URL } from '../config/api';
+
 let cachedBuiltinFunctions = null;
 
 export const fetchBuiltinFunctions = async () => {
   if (!cachedBuiltinFunctions) {
     try {
-      // Try with relative URL first
-      let response = await fetch('/api/builtin-functions');
-      
-      // If that fails, try with absolute URL
-      if (!response.ok) {
-        response = await fetch('http://127.0.0.1:5000/api/builtin-functions');
-      }
+      // Try with the configured API URL
+      let response = await fetch(`${API_BASE_URL}/api/builtin-functions`);
       
       if (response.ok) {
         cachedBuiltinFunctions = await response.json();
