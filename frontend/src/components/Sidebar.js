@@ -5,13 +5,23 @@ import {
   ListItem,
   ListItemText,
   Collapse,
+  Switch,
+  ListItemIcon,
+  Typography,
+  Box,
 } from '@mui/material';
 import ExpandLess from '@mui/icons-material/ExpandLess';
 import ExpandMore from '@mui/icons-material/ExpandMore';
+import SettingsIcon from '@mui/icons-material/Settings';
+import BugReportIcon from '@mui/icons-material/BugReport';
+import CodeIcon from '@mui/icons-material/Code';
+import GroupIcon from '@mui/icons-material/Group';
+import InfoIcon from '@mui/icons-material/Info';
 
-const Sidebar = ({ open, toggleDrawer }) => {
+const Sidebar = ({ open, toggleDrawer, debugMode, setDebugMode }) => {
   const [developersOpen, setDevelopersOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const handleDevelopersClick = () => {
     setDevelopersOpen(!developersOpen);
@@ -19,6 +29,14 @@ const Sidebar = ({ open, toggleDrawer }) => {
 
   const handleAboutClick = () => {
     setAboutOpen(!aboutOpen);
+  };
+  
+  const handleSettingsClick = () => {
+    setSettingsOpen(!settingsOpen);
+  };
+  
+  const handleDebugModeToggle = () => {
+    setDebugMode(!debugMode);
   };
   
   const developers = [
@@ -49,7 +67,40 @@ const Sidebar = ({ open, toggleDrawer }) => {
       }}
     >
       <List>
+        <ListItem button onClick={handleSettingsClick}>
+          <ListItemIcon>
+            <SettingsIcon sx={{ color: '#fff' }} />
+          </ListItemIcon>
+          <ListItemText primary="Settings" />
+          {settingsOpen ? <ExpandLess /> : <ExpandMore />}
+        </ListItem>
+        <Collapse in={settingsOpen} timeout="auto" unmountOnExit>
+          <List component="div" disablePadding>
+            <ListItem sx={{ pl: 4 }}>
+              <ListItemIcon>
+                <BugReportIcon sx={{ color: '#fff' }} />
+              </ListItemIcon>
+              <ListItemText primary="Debug Mode" />
+              <Switch 
+                checked={debugMode} 
+                onChange={handleDebugModeToggle} 
+                color="primary"
+              />
+            </ListItem>
+            <ListItem sx={{ pl: 4 }}>
+              <Box sx={{ pl: 4.5, fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>
+                <Typography variant="caption">
+                  Shows terminal output, token stream, AST and symbol table tools
+                </Typography>
+              </Box>
+            </ListItem>
+          </List>
+        </Collapse>
+
         <ListItem button onClick={handleDevelopersClick}>
+          <ListItemIcon>
+            <GroupIcon sx={{ color: '#fff' }} />
+          </ListItemIcon>
           <ListItemText primary="Developers" />
           {developersOpen ? <ExpandLess /> : <ExpandMore />}
         </ListItem>
@@ -64,6 +115,9 @@ const Sidebar = ({ open, toggleDrawer }) => {
         </Collapse>
 
         <ListItem button onClick={handleAboutClick}>
+          <ListItemIcon>
+            <InfoIcon sx={{ color: '#fff' }} />
+          </ListItemIcon>
           <ListItemText primary="About the Language" />
           {aboutOpen ? <ExpandLess /> : <ExpandMore />}
         </ListItem>

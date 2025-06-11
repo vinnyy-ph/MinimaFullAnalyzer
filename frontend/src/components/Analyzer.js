@@ -6,6 +6,7 @@ import Errors from './Errors';
 import CodeOutput from './CodeOutput';
 import axios from 'axios';
 import logo from '../assets/logomnm.png'; 
+import Sidebar from './Sidebar';
 import { 
   Grid, 
   Box, 
@@ -24,7 +25,18 @@ import {
   ListItemIcon,
   ListItemText,
   Divider,
-  Tooltip
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TableContainer,
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  Chip
 } from '@mui/material';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
@@ -37,8 +49,11 @@ import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
+import TableViewIcon from '@mui/icons-material/TableView';
+import CloseIcon from '@mui/icons-material/Close';
 
-const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
+const Analyzer = ({ toggleSidebar: parentToggleSidebar, themeMode, toggleTheme }) => {
   const [code, setCode] = useState('');
   const [tokens, setTokens] = useState([]);
   const [errors, setErrors] = useState([]);
@@ -55,6 +70,13 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
   const [executionId, setExecutionId] = useState(null);
   const [userInput, setUserInput] = useState('');
   
+  // Add new state for AST and Symbol Table
+  const [astDialogOpen, setAstDialogOpen] = useState(false);
+  const [symbolTableDialogOpen, setSymbolTableDialogOpen] = useState(false);
+  const [ast, setAst] = useState(null);
+  const [astLoading, setAstLoading] = useState(false);
+  const [astError, setAstError] = useState(null);
+  
   // Recent files state
   const [recentFiles, setRecentFiles] = useState([]);
   const [anchorEl, setAnchorEl] = useState(null);
@@ -63,6 +85,18 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
   // Terminal specific refs and states
   const terminalRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Add new state for Symbol Table
+  const [symbolTable, setSymbolTable] = useState(null);
+  const [symbolTableLoading, setSymbolTableLoading] = useState(false);
+  const [symbolTableError, setSymbolTableError] = useState(null);
+  const [symbolTableTab, setSymbolTableTab] = useState(0);
+
+  // Add debug mode state
+  const [debugMode, setDebugMode] = useState(false);
+
+  // Add state for sidebar open
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const theme = useTheme();
 
@@ -215,8 +249,13 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     }
   };
 
+  // Modified handleTabChange to allow switching between tabs 0 and 1 regardless of debug mode
   const handleTabChange = (event, newValue) => {
-    setRightPanelTab(newValue);
+    // In non-debug mode, allow switching between tabs 0 (Lexical) and 1 (Program Output)
+    // In debug mode, allow switching to any tab
+    if (newValue <= 1 || debugMode) {
+      setRightPanelTab(newValue);
+    }
   };
 
   // Auto-scroll to bottom of terminal output when it changes
@@ -233,7 +272,7 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
 
   const handleAnalyze = () => {
     setLoading(true);
-    axios.post('http://localhost:5000/analyzeFull', { code })
+    axios.post('http://localhost:5000/analyze_full', { code })
     .then((response) => {
       const data = response.data;
       setTokens(data.tokens);
@@ -279,7 +318,7 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     setExecutionId(null);
     setUserInput('');
     
-    // Switch to the Program Output tab when executing
+    // match to the Program Output tab when executing
     setRightPanelTab(1);
     
     axios.post('http://localhost:5000/executeCode', { code })
@@ -470,6 +509,84 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
     return new Date(b.lastOpened) - new Date(a.lastOpened);
   });
 
+  // Function to fetch and display the AST
+  const handleShowAst = () => {
+    setAstLoading(true);
+    setAstError(null);
+    
+    axios.post('http://localhost:5000/getAST', { code })
+      .then((response) => {
+        const data = response.data;
+        if (data.success) {
+          setAst(data.ast);
+          setAstDialogOpen(true);
+        } else {
+          setAstError(data.error || 'Failed to generate AST');
+        }
+        setAstLoading(false);
+      })
+      .catch((error) => {
+        console.error('Error fetching AST:', error);
+        setAstError('Error connecting to server: ' + error.message);
+        setAstLoading(false);
+      });
+  };
+  
+  // Function to fetch and display the Symbol Table
+  const handleShowSymbolTable = () => {
+    setSymbolTableLoading(true);
+    setSymbolTableError(null);
+    
+    axios.post('http://localhost:5000/getSymbolTable', { code })
+      .then((response) => {
+        const data = response.data;
+        if (data.success) {
+          setSymbolTable(data.symbols);
+          setSymbolTableDialogOpen(true);
+        } else {
+          setSymbolTableError(data.error || 'Failed to generate symbol table');
+        }
+        setSymbolTableLoading(false);
+      })
+      .catch((error) => {
+        console.error('Error fetching symbol table:', error);
+        setSymbolTableError('Error connecting to server: ' + error.message);
+        setSymbolTableLoading(false);
+      });
+  };
+  
+  // Helper function to render the AST tree (recursive)
+  const renderAstNode = (node, index = 0) => {
+    if (!node) return null;
+    
+    return (
+      <Box key={index} sx={{ ml: 3 }}>
+        <Typography 
+          component="div" 
+          sx={{ 
+            fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
+            fontSize: '0.85rem',
+            color: theme.palette.mode === 'dark' ? '#9cdcfe' : '#0000ff',
+            fontWeight: node.children ? 'bold' : 'normal',
+            mt: 0.5
+          }}
+        >
+          {node.name}
+        </Typography>
+        {node.children && node.children.map((child, idx) => renderAstNode(child, `${index}-${idx}`))}
+      </Box>
+    );
+  };
+
+  // Handle sidebar toggle
+  const handleToggleSidebar = () => {
+    setSidebarOpen(!sidebarOpen);
+    // Also call the parent toggle if it exists
+    if (parentToggleSidebar) {
+      parentToggleSidebar();
+    }
+  };
+
   return (
     <div style={{ padding: '20px' }}>
       <Grid container spacing={2}>
@@ -494,7 +611,7 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
               }}
             >
               <IconButton 
-                onClick={toggleSidebar} 
+                onClick={handleToggleSidebar} 
                 sx={{ 
                   display: 'flex', 
                   alignItems: 'center', 
@@ -649,7 +766,7 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
           
           {/* Unified Error Messages */}
           <Box sx={{ mt: 2 }}>
-            <Errors errors={errors} terminalOutput={terminalOutput} />
+            <Errors errors={errors} terminalOutput={terminalOutput} debugMode={debugMode} />
           </Box>
         </Grid>
 
@@ -666,7 +783,7 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
               flexDirection: 'column',
             }}
           >
-            {/* Tabs for switching views */}
+            {/* Tabs for matching views */}
             <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
               <Tabs 
                 value={rightPanelTab} 
@@ -692,11 +809,13 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                   label="Program Output" 
                   iconPosition="start"
                 />
-                <Tab 
-                  icon={<CodeIcon />} 
-                  label="IR Representation" 
-                  iconPosition="start"
-                />
+                {debugMode && (
+                  <Tab 
+                    icon={<CodeIcon />} 
+                    label="IR Representation" 
+                    iconPosition="start"
+                  />
+                )}
               </Tabs>
             </Box>
             
@@ -705,7 +824,7 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
               {/* Lexical Token Stream Panel */}
               {rightPanelTab === 0 && (
                 <Box sx={{ height: '100%', padding: 3 }}>
-                  <OutputTable tokens={tokens} />
+                  <OutputTable tokens={tokens} debugMode={debugMode} />
                 </Box>
               )}
               
@@ -873,6 +992,55 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                               />
                             </Box>
                           )}
+                          
+                          {/* Only show these buttons in debug mode */}
+                          {debugMode && !waitingForInput && (
+                            <Box 
+                              sx={{ 
+                                display: 'flex', 
+                                justifyContent: 'center', 
+                                gap: 2,
+                                mt: 3,
+                                pb: 1
+                              }}
+                            >
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<AccountTreeIcon />}
+                                onClick={handleShowAst}
+                                disabled={astLoading || errors.length > 0}
+                                sx={{
+                                  textTransform: 'none',
+                                  borderColor: theme.palette.primary.main,
+                                  color: theme.palette.primary.main,
+                                  '&:hover': {
+                                    backgroundColor: theme.palette.primary.main + '1A',  // 10% opacity
+                                  }
+                                }}
+                              >
+                                {astLoading ? 'Loading...' : 'Show AST'}
+                              </Button>
+                              
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<TableViewIcon />}
+                                onClick={handleShowSymbolTable}
+                                disabled={errors.length > 0}
+                                sx={{
+                                  textTransform: 'none',
+                                  borderColor: theme.palette.secondary.main,
+                                  color: theme.palette.secondary.main,
+                                  '&:hover': {
+                                    backgroundColor: theme.palette.secondary.main + '1A',  // 10% opacity
+                                  }
+                                }}
+                              >
+                                Show Symbol Table
+                              </Button>
+                            </Box>
+                          )}
                         </Box>
                       ) : (
                         // Empty state - no program output yet
@@ -901,8 +1069,8 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
                 </Box>
               )}
               
-              {/* IR Representation Panel */}
-              {rightPanelTab === 2 && (
+              {/* IR Representation Panel - Only shown in debug mode */}
+              {debugMode && rightPanelTab === 2 && (
                 <Box sx={{ height: '100%', p: 0 }}>
                   <Box
                     sx={{
@@ -989,6 +1157,358 @@ const Analyzer = ({ toggleSidebar, themeMode, toggleTheme }) => {
           </Paper>
         </Grid>
       </Grid>
+
+      {/* AST Dialog */}
+      <Dialog
+        open={astDialogOpen}
+        onClose={() => setAstDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: theme.palette.background.paper,
+            borderRadius: 2,
+            boxShadow: 24,
+          }
+        }}
+      >
+        <DialogTitle sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          borderBottom: `1px solid ${theme.palette.divider}`,
+          pb: 1
+        }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <AccountTreeIcon sx={{ mr: 1, color: theme.palette.primary.main }} />
+            <Typography variant="h6" component="div">
+              Abstract Syntax Tree (AST)
+            </Typography>
+          </Box>
+          <IconButton
+            edge="end"
+            color="inherit"
+            onClick={() => setAstDialogOpen(false)}
+            aria-label="close"
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent 
+          dividers 
+          sx={{ 
+            backgroundColor: theme.palette.mode === 'dark' ? '#1a1a1a' : '#f5f5f5',
+            p: 3
+          }}
+        >
+          {astError ? (
+            <Box sx={{ color: 'error.main', p: 2 }}>
+              <Typography variant="subtitle1" fontWeight="bold">Error</Typography>
+              <Typography variant="body2">{astError}</Typography>
+            </Box>
+          ) : ast ? (
+            <Box 
+              sx={{ 
+                padding: 2,
+                borderRadius: 1,
+                border: `1px solid ${theme.palette.divider}`,
+                backgroundColor: theme.palette.mode === 'dark' ? '#121212' : '#ffffff',
+                maxHeight: '60vh',
+                overflow: 'auto',
+                '&::-webkit-scrollbar': { width: '10px' },
+                '&::-webkit-scrollbar-track': { 
+                  background: theme.palette.mode === 'dark' ? '#2e2e2e' : '#eaeaea', 
+                  borderRadius: '4px' 
+                },
+                '&::-webkit-scrollbar-thumb': {
+                  backgroundColor: theme.palette.mode === 'dark' ? '#555' : '#aaa',
+                  borderRadius: '10px',
+                  border: `2px solid ${theme.palette.mode === 'dark' ? '#2e2e2e' : '#eaeaea'}`,
+                }
+              }}
+            >
+              <Typography 
+                variant="subtitle1" 
+                sx={{ 
+                  mb: 2, 
+                  fontWeight: 'bold',
+                  color: theme.palette.primary.main
+                }}
+              >
+                Parse Tree Structure
+              </Typography>
+              {renderAstNode(ast)}
+            </Box>
+          ) : (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+              <CircularProgress />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button 
+            onClick={() => setAstDialogOpen(false)} 
+            variant="contained"
+            color="primary"
+          >
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Symbol Table Dialog */}
+      <Dialog
+        open={symbolTableDialogOpen}
+        onClose={() => setSymbolTableDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: theme.palette.background.paper,
+            borderRadius: 2,
+            boxShadow: 24,
+          }
+        }}
+      >
+        <DialogTitle sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          borderBottom: `1px solid ${theme.palette.divider}`,
+          pb: 1
+        }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <TableViewIcon sx={{ mr: 1, color: theme.palette.secondary.main }} />
+            <Typography variant="h6" component="div">
+              Symbol Table
+            </Typography>
+          </Box>
+          <IconButton
+            edge="end"
+            color="inherit"
+            onClick={() => setSymbolTableDialogOpen(false)}
+            aria-label="close"
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent 
+          dividers 
+          sx={{ 
+            backgroundColor: theme.palette.mode === 'dark' ? '#1a1a1a' : '#f5f5f5',
+            p: 3
+          }}
+        >
+          {symbolTableError ? (
+            <Box sx={{ color: 'error.main', p: 2 }}>
+              <Typography variant="subtitle1" fontWeight="bold">Error</Typography>
+              <Typography variant="body2">{symbolTableError}</Typography>
+            </Box>
+          ) : symbolTableLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+              <CircularProgress />
+            </Box>
+          ) : !symbolTable ? (
+            <Box 
+              sx={{ 
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                p: 4
+              }}
+            >
+              <TableViewIcon sx={{ fontSize: '3rem', color: 'text.secondary', mb: 2 }} />
+              <Typography variant="h6" sx={{ mb: 1 }}>
+                No Symbol Table Data Available
+              </Typography>
+              <Typography variant="body2" align="center" color="text.secondary">
+                Click the "Show Symbol Table" button to generate the symbol table.
+              </Typography>
+            </Box>
+          ) : (
+            <Box>
+              {/* Filter Tabs */}
+              <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+                <Tabs 
+                  value={symbolTableTab || 0} 
+                  onChange={(e, newValue) => setSymbolTableTab(newValue)}
+                  sx={{ mb: 1 }}
+                >
+                  <Tab label="All Symbols" />
+                  <Tab label="Variables" />
+                  <Tab label="Functions" />
+                  <Tab label="Parameters" />
+                </Tabs>
+              </Box>
+              
+              {/* Symbol Table */}
+              <TableContainer 
+                component={Paper} 
+                sx={{ 
+                  maxHeight: '50vh',
+                  '&::-webkit-scrollbar': { width: '10px' },
+                  '&::-webkit-scrollbar-track': { 
+                    background: theme.palette.mode === 'dark' ? '#2e2e2e' : '#eaeaea', 
+                    borderRadius: '4px' 
+                  },
+                  '&::-webkit-scrollbar-thumb': {
+                    backgroundColor: theme.palette.mode === 'dark' ? '#555' : '#aaa',
+                    borderRadius: '10px',
+                    border: `2px solid ${theme.palette.mode === 'dark' ? '#2e2e2e' : '#eaeaea'}`,
+                  }
+                }}
+              >
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.mode === 'dark' ? '#333' : '#f1f1f1' }}>Name</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.mode === 'dark' ? '#333' : '#f1f1f1' }}>Kind</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.mode === 'dark' ? '#333' : '#f1f1f1' }}>Scope</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.mode === 'dark' ? '#333' : '#f1f1f1' }}>Line:Col</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {symbolTable
+                      .filter(symbol => {
+                        // Remove built-in functions from all views
+                        if (symbol.scope === 'builtin') return false;
+                        
+                        // Convert parameters into their own category
+                        const symbolKind = symbol.isParameter ? 'parameter' : symbol.kind;
+                        
+                        // Filter based on active tab
+                        if (symbolTableTab === 0) return true; // All symbols
+                        if (symbolTableTab === 1) return symbolKind === 'variable'; // Variables only
+                        if (symbolTableTab === 2) return symbolKind === 'function'; // User functions only
+                        if (symbolTableTab === 3) return symbolKind === 'parameter'; // Parameters only
+                        return true;
+                      })
+                      .map((symbol, index) => {
+                        // Determine the actual kind to display (parameter or original kind)
+                        const displayKind = symbol.isParameter ? 'parameter' : symbol.kind;
+                        
+                        return (
+                          <TableRow 
+                            key={index}
+                            sx={{
+                              '&:nth-of-type(odd)': {
+                                backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.02)',
+                              },
+                              '&:hover': {
+                                backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)',
+                              }
+                            }}
+                          >
+                            <TableCell>
+                              <Typography 
+                                variant="body2" 
+                                sx={{ 
+                                  fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
+                                  fontWeight: displayKind === 'function' ? 'bold' : 'normal',
+                                  color: displayKind === 'function' ? 
+                                    (theme.palette.mode === 'dark' ? '#4fc3f7' : '#0277bd') : 
+                                    theme.palette.text.primary
+                                }}
+                              >
+                                {symbol.name}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Chip 
+                                label={displayKind} 
+                                size="small"
+                                sx={{ 
+                                  backgroundColor: 
+                                    displayKind === 'function' ? 
+                                      (theme.palette.mode === 'dark' ? 'rgba(33, 150, 243, 0.2)' : 'rgba(33, 150, 243, 0.1)') :
+                                    displayKind === 'parameter' ?
+                                      (theme.palette.mode === 'dark' ? 'rgba(255, 193, 7, 0.2)' : 'rgba(255, 193, 7, 0.1)') :
+                                      (theme.palette.mode === 'dark' ? 'rgba(76, 175, 80, 0.2)' : 'rgba(76, 175, 80, 0.1)'),
+                                  color: 
+                                    displayKind === 'function' ? 
+                                      (theme.palette.mode === 'dark' ? '#42a5f5' : '#1565c0') :
+                                    displayKind === 'parameter' ?
+                                      (theme.palette.mode === 'dark' ? '#ffb300' : '#ff8f00') :
+                                      (theme.palette.mode === 'dark' ? '#66bb6a' : '#2e7d32'),
+                                  height: '22px',
+                                  '& .MuiChip-label': {
+                                    fontSize: '0.7rem',
+                                    px: 1
+                                  }
+                                }}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Chip 
+                                label={symbol.scope} 
+                                size="small"
+                                sx={{ 
+                                  backgroundColor: 
+                                    symbol.scope.startsWith('local:') ? 
+                                      (theme.palette.mode === 'dark' ? 'rgba(156, 39, 176, 0.2)' : 'rgba(156, 39, 176, 0.1)') :
+                                      (theme.palette.mode === 'dark' ? 'rgba(0, 137, 123, 0.2)' : 'rgba(0, 137, 123, 0.1)'),
+                                  color:
+                                    symbol.scope.startsWith('local:') ? 
+                                      (theme.palette.mode === 'dark' ? '#ba68c8' : '#6a1b9a') :
+                                      (theme.palette.mode === 'dark' ? '#26a69a' : '#00695c'),
+                                  height: '22px',
+                                  '& .MuiChip-label': {
+                                    fontSize: '0.7rem',
+                                    px: 1
+                                  }
+                                }}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              {symbol.line && symbol.column ? (
+                                <Typography 
+                                  variant="body2"
+                                  sx={{ 
+                                    fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
+                                    fontSize: '0.8rem',
+                                    color: theme.palette.text.secondary
+                                  }}
+                                >
+                                  {`${symbol.line}:${symbol.column}`}
+                                </Typography>
+                              ) : (
+                                '—'
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              
+              {symbolTable.filter(symbol => symbol.scope !== 'builtin').length === 0 && (
+                <Box sx={{ p: 3, textAlign: 'center' }}>
+                  <Typography color="text.secondary">No symbols found in the code.</Typography>
+                </Box>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button 
+            onClick={() => setSymbolTableDialogOpen(false)} 
+            variant="contained"
+            color="primary"
+          >
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Update Sidebar component with correct props */}
+      <Sidebar 
+        open={sidebarOpen} 
+        toggleDrawer={handleToggleSidebar} 
+        debugMode={debugMode} 
+        setDebugMode={setDebugMode} 
+      />
     </div>
   );
 };

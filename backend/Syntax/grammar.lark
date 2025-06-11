@@ -1,0 +1,357 @@
+%import common.WS
+%ignore WS
+%ignore /\n/
+%ignore /#.*/
+
+LBRACE: "{"
+RBRACE: "}"
+LSQB: "["
+RSQB: "]"
+LPAREN: "("
+RPAREN: ")"
+
+VAR: "var"
+FIXED: "fixed"
+GROUP: "group"
+GET: "get"
+THROW: "throw"
+SHOW: "show"
+CHECKIF: "checkif"
+RECHECK: "recheck"
+OTHERWISE: "otherwise"
+MATCH: "match"
+CASE: "case"
+DEFAULT: "default"
+EXIT: "exit"
+NEXT: "next"
+EACH: "each"
+REPEAT: "repeat"
+DO: "do"
+EMPTY: "empty"
+FUNC: "func"
+ABS: "abs"
+CEIL: "ceil"
+CONTAINS: "contains"
+FACTORIAL: "factorial"
+FLOOR: "floor"
+ISQRT: "isqrt"
+JOIN: "join"
+LENGTH: "length"
+LOWERCASE: "lowercase"
+MAX: "max"
+MIN: "min"
+POW: "pow"
+REVERSE: "reverse"
+ROUND: "round"
+SLICE: "slice"
+SORTED: "sorted"
+SUM: "sum"
+TYPE: "type"
+UNIQUE: "unique"
+UPPERCASE: "uppercase"
+
+OR_OP: "||"
+AND_OP: "&&"
+EQ_OP: "=="
+NEQ_OP: "!="
+LT: "<"
+LE: "<="
+GT: ">"
+GE: ">="
+
+PLUS: "+"
+MINUS: "-"
+STAR: "*"
+SLASH: "/"
+PERCENT: "%"
+
+BANG: "!"
+INC_OP: "++"
+DEC_OP: "--"
+
+ASSIGN: "="
+ADD_ASSIGN: "+="
+SUB_ASSIGN: "-="
+MUL_ASSIGN: "*="
+DIV_ASSIGN: "/="
+
+COMMA: ","
+COLON: ":"
+SEMICOLON: ";"
+
+INTEGER: "integer"
+POINT: "point"
+STATE: "state"
+TEXT: "text"
+
+IDENTIFIER: /(?!(?:var|fixed|group|func|throw|show|checkif|recheck|otherwise|match|case|default|exit|next|each|repeat|do|integer|point|state|text|empty|get|abs|ceil|contains|factorial|floor|isqrt|join|length|lowercase|max|min|pow|reverse|round|slice|sorted|sum|type|unique|uppercase)(?![a-zA-Z0-9_]))[a-z][a-zA-Z0-9_]*/
+INTEGERLITERAL: /[0-9]{1,9}/
+POINTLITERAL: /[0-9]{1,9}\.[0-9]{1,9}/
+NEGINTEGERLITERAL: /-[0-9]{1,9}/
+NEGPOINTLITERAL: /-[0-9]{1,9}\.[0-9]{1,9}/
+TEXTLITERAL: /"(\\.|[^"\\])*"/
+STATELITERAL: "YES" | "NO"
+
+start: program
+
+program: (declarations | func_definition | statements)*
+
+program_block: (declarations | statements)*
+
+declarations: varlist_declaration
+            | fixed_declaration
+            | group_declaration
+
+varlist_declaration: VAR IDENTIFIER var_init varlist_tail SEMICOLON
+varlist_tail: COMMA IDENTIFIER var_init varlist_tail
+            | 
+            
+fixed_declaration: FIXED IDENTIFIER ASSIGN variable_value fixed_tail SEMICOLON
+fixed_tail: COMMA IDENTIFIER ASSIGN variable_value fixed_tail
+          | 
+
+group_declaration: GROUP IDENTIFIER LBRACE group_members RBRACE SEMICOLON?
+group_members: expression COLON variable_value member_tail
+member_tail: COMMA group_members
+           | 
+
+var_init: ASSIGN variable_value
+        | 
+
+variable_value: LSQB list_value? RSQB
+              | expression
+
+
+get_operand: expression
+           |
+
+list_value: expression list_tail
+list_tail: COMMA expression list_tail
+         | 
+
+id_usage: IDENTIFIER id_usagetail
+        | ABS id_usagetail
+        | CEIL id_usagetail
+        | CONTAINS id_usagetail
+        | FACTORIAL id_usagetail
+        | FLOOR id_usagetail
+        | ISQRT id_usagetail
+        | JOIN id_usagetail
+        | LENGTH id_usagetail
+        | LOWERCASE id_usagetail
+        | MAX id_usagetail
+        | MIN id_usagetail
+        | POW id_usagetail
+        | REVERSE id_usagetail
+        | ROUND id_usagetail
+        | SLICE id_usagetail
+        | SORTED id_usagetail
+        | SUM id_usagetail
+        | TYPE id_usagetail
+        | UNIQUE id_usagetail
+        | UPPERCASE id_usagetail
+        
+
+?id_usagetail: group_or_list unary_op
+             | func_call
+
+func_call: LPAREN args RPAREN
+
+group_or_list: LSQB expression RSQB
+             | LBRACE expression RBRACE
+             | 
+
+unary_op: INC_OP
+        | DEC_OP
+        | 
+
+assign_op: ASSIGN
+         | ADD_ASSIGN
+         | SUB_ASSIGN
+         | MUL_ASSIGN
+         | DIV_ASSIGN
+
+?expression: logical_or_expr
+
+?logical_or_expr: logical_and_expr
+                | logical_or_expr OR_OP logical_and_expr
+
+?logical_and_expr: equality_expr
+                 | logical_and_expr AND_OP equality_expr
+
+?equality_expr: relational_expr
+              | equality_expr (EQ_OP | NEQ_OP) relational_expr
+
+?relational_expr: add_expr
+                | relational_expr (LT|LE|GT|GE) add_expr
+
+?add_expr: mul_expr
+         | add_expr (PLUS|MINUS) mul_expr
+
+?mul_expr: pre_expr
+         | mul_expr (STAR|SLASH|PERCENT) pre_expr
+
+?pre_expr: BANG pre_expr
+         | MINUS pre_expr
+         | primary_expr
+
+?primary_expr: LPAREN expression RPAREN
+             | operand
+
+?operand: literals
+        | typecast_expression
+        | id_usage
+        | GET LPAREN get_operand RPAREN
+        
+?literals: TEXTLITERAL
+         | INTEGERLITERAL
+         | NEGINTEGERLITERAL
+         | POINTLITERAL
+         | NEGPOINTLITERAL
+         | STATELITERAL
+         | EMPTY
+
+typecast_expression: (INTEGER | POINT | STATE | TEXT) LPAREN expression RPAREN
+
+?statements: var_assign SEMICOLON
+           | expression SEMICOLON
+           | show_statement SEMICOLON
+           | conditional_statement
+           | loop_statement
+
+var_assign: IDENTIFIER group_or_list assign_op variable_value
+
+show_statement: SHOW LPAREN expression RPAREN
+
+?conditional_statement: checkif_statement SEMICOLON?
+                      | match_statement SEMICOLON?
+
+?loop_statement: each_statement SEMICOLON?
+               | repeat_statement SEMICOLON? 
+               | do_repeat_statement SEMICOLON?
+
+checkif_statement: CHECKIF LPAREN expression RPAREN LBRACE program_block RBRACE recheck_statement otherwise_statement
+
+?recheck_statement: RECHECK LPAREN expression RPAREN LBRACE program_block RBRACE recheck_statement
+                  | 
+?otherwise_statement: OTHERWISE LBRACE program_block RBRACE
+                    | 
+
+match_statement: MATCH LPAREN expression RPAREN LBRACE CASE literals COLON program_block case_tail default RBRACE
+
+?case_tail: CASE literals COLON program_block case_tail
+          | 
+
+?default: DEFAULT COLON program_block
+        | 
+
+each_statement: EACH LPAREN each_initialization expression SEMICOLON (expression | var_assign) RPAREN LBRACE loop_block RBRACE
+
+repeat_statement: REPEAT LPAREN expression RPAREN LBRACE loop_block RBRACE SEMICOLON?
+
+do_repeat_statement: DO LBRACE loop_block RBRACE REPEAT LPAREN expression RPAREN SEMICOLON?
+
+?each_initialization: varlist_declaration
+                    | var_assign SEMICOLON
+
+loop_block: ( declarations
+            | var_assign SEMICOLON
+            | expression SEMICOLON
+            | show_statement SEMICOLON
+            | conditional_loop_statement
+            | loop_statement
+            | control_flow )*
+
+?conditional_loop_statement: loop_checkif_statement SEMICOLON?
+                           | loop_match_statement SEMICOLON?
+
+loop_checkif_statement: CHECKIF LPAREN expression RPAREN LBRACE loop_block RBRACE loop_recheck_statement loop_otherwise_statement
+
+?loop_recheck_statement: RECHECK LPAREN expression RPAREN LBRACE loop_block RBRACE loop_recheck_statement
+                       | 
+?loop_otherwise_statement: OTHERWISE LBRACE loop_block RBRACE
+                         | 
+
+loop_match_statement: MATCH LPAREN expression RPAREN LBRACE CASE literals COLON loop_block case_tail_loop loop_match_default RBRACE
+
+?case_tail_loop: CASE literals COLON loop_block case_tail_loop
+               | 
+
+?loop_match_default: DEFAULT COLON loop_block |
+
+func_definition: FUNC IDENTIFIER LPAREN param RPAREN LBRACE function_prog RBRACE SEMICOLON?
+
+?param: IDENTIFIER (COMMA IDENTIFIER )*   
+       |                                 
+
+throw_statement: THROW expression SEMICOLON
+
+?args: expression (COMMA expression)*
+        |
+
+function_prog: ( declarations
+               | var_assign SEMICOLON
+               | expression SEMICOLON
+               | show_statement SEMICOLON
+               | conditional_func_statement
+               | loop_func_statement
+               | throw_statement )*
+
+?conditional_func_statement: func_checkif_statement SEMICOLON?
+                           | func_match_statement SEMICOLON?
+
+func_checkif_statement: CHECKIF LPAREN expression RPAREN LBRACE function_prog RBRACE func_recheck_statement func_otherwise_statement
+
+?func_recheck_statement: RECHECK LPAREN expression RPAREN LBRACE function_prog RBRACE func_recheck_statement
+                       | 
+?func_otherwise_statement: OTHERWISE LBRACE function_prog RBRACE
+                          | 
+
+func_match_statement: MATCH LPAREN expression RPAREN LBRACE CASE literals COLON function_prog func_case_tail func_match_default RBRACE
+
+?func_case_tail: CASE literals COLON function_prog func_case_tail
+                | 
+
+?func_match_default: DEFAULT COLON function_prog
+                     | 
+
+control_flow: EXIT SEMICOLON
+            | NEXT SEMICOLON
+
+?loop_func_statement: each_func_statement SEMICOLON?
+                    | repeat_func_statement SEMICOLON? 
+                    | do_repeat_func_statement SEMICOLON?
+
+each_func_statement: EACH LPAREN each_initialization expression SEMICOLON (expression | var_assign) RPAREN LBRACE func_loop_block RBRACE SEMICOLON?
+
+repeat_func_statement: REPEAT LPAREN expression RPAREN LBRACE func_loop_block RBRACE SEMICOLON?
+
+do_repeat_func_statement: DO LBRACE func_loop_block RBRACE REPEAT LPAREN expression RPAREN SEMICOLON?
+
+func_loop_block: ( declarations
+                 | var_assign SEMICOLON
+                 | expression SEMICOLON
+                 | show_statement SEMICOLON
+                 | conditional_func_loop_statement
+                 | loop_func_statement
+                 | throw_statement
+                 | control_flow )*
+
+conditional_func_loop_statement: func_loop_checkif_statement SEMICOLON?
+                                | func_loop_match_statement SEMICOLON?
+
+func_loop_checkif_statement: CHECKIF LPAREN expression RPAREN LBRACE func_loop_block RBRACE func_loop_recheck_statement func_loop_otherwise_statement
+func_loop_recheck_statement: RECHECK LPAREN expression RPAREN LBRACE func_loop_block RBRACE func_loop_recheck_statement
+                           |
+func_loop_otherwise_statement: OTHERWISE LBRACE func_loop_block RBRACE
+                             |
+func_loop_match_statement: MATCH LPAREN expression RPAREN LBRACE CASE literals COLON func_loop_block func_loop_case_tail func_loop_match_default RBRACE
+
+func_loop_case_tail: CASE literals COLON func_loop_block func_loop_case_tail
+                   |
+
+func_loop_match_default: DEFAULT COLON func_loop_block 
+                   | 
+
+terminator: SEMICOLON
+          | 

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useContext } from 'react';
 import { 
   Alert, 
   AlertTitle, 
@@ -10,14 +10,20 @@ import {
   Chip,
   Tabs,
   Tab,
-  CircularProgress
+  CircularProgress,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import CodeIcon from '@mui/icons-material/Code';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
-const Errors = ({ errors, terminalOutput = '' }) => {
+// import { EditorContext } from '../context/EditorContext';
+
+const Errors = ({ errors, terminalOutput = '', debugMode }) => {
   const theme = useTheme();
   const boxRef = useRef(null);
   const [tabIndex, setTabIndex] = useState(0);
@@ -28,12 +34,22 @@ const Errors = ({ errors, terminalOutput = '' }) => {
     }
   }, [errors, tabIndex, terminalOutput]);
 
+  // Reset to errors tab if user has terminal tab selected but debug mode gets turned off
+  useEffect(() => {
+    if (!debugMode && tabIndex === 1) {
+      setTabIndex(0);
+    }
+  }, [debugMode, tabIndex]);
+
   const lexicalErrors = errors.filter((error) => error.type === 'lexical');
   const syntaxErrors = errors.filter((error) => error.type === 'syntax');
   const semanticErrors = errors.filter((error) => error.type === 'semantic');
 
   const handleTabChange = (event, newValue) => {
-    setTabIndex(newValue);
+    // Only allow changing to terminal tab if debug mode is on
+    if (newValue === 0 || (newValue === 1 && debugMode)) {
+      setTabIndex(newValue);
+    }
   };
 
   const hasErrors = errors.length > 0;
@@ -170,15 +186,274 @@ const Errors = ({ errors, terminalOutput = '' }) => {
     );
   };
 
+  // Function to jump to error location in editor
+  const jumpToErrorLocation = (line, column) => {
+    // Check if we have access to the editor
+    if (window.monaco && window.editor) {
+      try {
+        console.log(`Jumping to line ${line}, column ${column}`);
+        
+        // Convert to numbers to ensure proper handling
+        const lineNumber = parseInt(line, 10);
+        const columnNumber = parseInt(column, 10);
+        
+        if (isNaN(lineNumber) || isNaN(columnNumber)) {
+          console.error(`Invalid line or column values: line=${line}, column=${column}`);
+          return;
+        }
+        
+        // Ensure the editor has a valid model
+        const model = window.editor.getModel();
+        if (!model) {
+          console.error('Editor has no model');
+          return;
+        }
+        
+        // Check if the line is within the bounds of the document
+        const lineCount = model.getLineCount();
+        if (lineNumber > lineCount) {
+          console.warn(`Line ${lineNumber} is out of bounds (max: ${lineCount})`);
+          return;
+        }
+        
+        // Monaco uses 1-based line numbers and 1-based column numbers
+        window.editor.revealPositionInCenter({
+          lineNumber: lineNumber,
+          column: columnNumber
+        });
+        
+        // Set selection at the error position with a wider selection for visibility
+        window.editor.setSelection({
+          startLineNumber: lineNumber,
+          startColumn: Math.max(1, columnNumber - 1),
+          endLineNumber: lineNumber,
+          endColumn: columnNumber + 2
+        });
+        
+        // Add a highlighted decoration to make the error location more visible
+        const decorations = window.editor.deltaDecorations([], [
+          {
+            range: {
+              startLineNumber: lineNumber,
+              startColumn: Math.max(1, columnNumber - 1),
+              endLineNumber: lineNumber,
+              endColumn: columnNumber + 2
+            },
+            options: {
+              className: 'error-highlight-decoration',
+              isWholeLine: false,
+              inlineClassName: 'error-inline-decoration',
+              stickiness: window.monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
+            }
+          }
+        ]);
+        
+        // Remove the decoration after 3 seconds
+        setTimeout(() => {
+          window.editor.deltaDecorations(decorations, []);
+        }, 3000);
+        
+        window.editor.focus();
+      } catch (e) {
+        console.error('Error jumping to position:', e);
+      }
+    } else {
+      console.warn('Editor not available. Cannot jump to position.');
+    }
+  };
+
+  // Special formatting for lexer errors to ensure line/column data is properly displayed
+  const formatLexerError = (error) => {
+    // Check if error has direct line/column information
+    if (error.line !== undefined && error.column !== undefined) {
+      // Create a unique element ID for this error
+      const locationId = `lexer-err-${error.line}-${error.column}-${Math.random().toString(36).substring(2, 8)}`;
+      
+      // Format the message with highlighted line/column information
+      let formattedMessage = error.message;
+      
+      // Add location information if not already present in the message
+      if (!formattedMessage.includes('line') && !formattedMessage.includes('column')) {
+        formattedMessage += ` <span class="error-location" id="${locationId}" data-line="${error.line}" data-column="${error.column}">(at line ${error.line}, column ${error.column})</span>`;
+      } else {
+        // Replace existing line/column information with highlighted version
+        formattedMessage = formattedMessage.replace(
+          /(at\s+)?line\s+(\d+),\s+column\s+(\d+)/i,
+          `<span class="error-location" id="${locationId}" data-line="${error.line}" data-column="${error.column}">at line ${error.line}, column ${error.column}</span>`
+        );
+      }
+      
+      // Schedule the attachment of click handler
+      setTimeout(() => {
+        const elem = document.getElementById(locationId);
+        if (elem) {
+          // Remove any existing click handlers to prevent duplicates
+          const newElem = elem.cloneNode(true);
+          elem.parentNode.replaceChild(newElem, elem);
+          
+          newElem.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            jumpToErrorLocation(error.line, error.column);
+          });
+          
+          // Add title and styling
+          newElem.title = "Click to jump to this location in the editor";
+          newElem.style.cursor = "pointer";
+        }
+      }, 10);
+      
+      return formattedMessage;
+    }
+    
+    // If no direct line/column info, fall back to extracting from the message
+    return formatErrorMessage(error.message);
+  };
+
+  // Check for line and column information in error messages
+  const extractLineColumnInfo = (errorMessage) => {
+    if (!errorMessage) return { hasLocation: false };
+    
+    // Multiple regex patterns to match different error message formats
+    // 1. "at line X, column Y" format
+    const atLineColPattern = /(?:at\s+)?line\s+(\d+),\s+column\s+(\d+)/i;
+    
+    // 2. "at line X" format (for errors that only mention line)
+    const lineOnlyPattern = /(?:at\s+)?line\s+(\d+)(?!\s*,\s*column)/i;
+    
+    // 3. "Runtime Error at line X, column Y" format
+    const runtimeErrorPattern = /Runtime\s+Error(?:\s+at\s+line\s+|\s*\(?line\s*|\s+\(?line\s+)(\d+)(?:,\s*(?:col(?:umn)?\s*)?(\d+))?/i;
+    
+    // 4. Lexer specific error pattern - captures line/column information for lexer errors
+    const lexerErrorPattern = /.*?['"](.*?)['"].*?(?:line|at)\s+(\d+)(?:,\s*(?:col(?:umn)?\s*)?(\d+))?/i;
+    
+    let match;
+    
+    // Try each pattern in order
+    if (match = errorMessage.match(atLineColPattern)) {
+      return {
+        line: parseInt(match[1], 10),
+        column: parseInt(match[2], 10),
+        hasLocation: true
+      };
+    }
+    
+    if (match = errorMessage.match(runtimeErrorPattern)) {
+      return {
+        line: parseInt(match[1], 10),
+        column: match[2] ? parseInt(match[2], 10) : 1, // Default to column 1 if not specified
+        hasLocation: true
+      };
+    }
+    
+    if (match = errorMessage.match(lexerErrorPattern)) {
+      return {
+        line: parseInt(match[2], 10),
+        column: match[3] ? parseInt(match[3], 10) : 1, // Default to column 1 if not specified
+        hasLocation: true,
+        value: match[1] // Capture the problematic value for better context
+      };
+    }
+    
+    if (match = errorMessage.match(lineOnlyPattern)) {
+      return {
+        line: parseInt(match[1], 10),
+        column: 1, // Default to column 1 when only line is mentioned
+        hasLocation: true
+      };
+    }
+    
+    // Direct line and column properties from error object
+    const directLineColMatch = /^line:(\d+),\s*column:(\d+)$/i.exec(errorMessage);
+    if (directLineColMatch) {
+      return {
+        line: parseInt(directLineColMatch[1], 10),
+        column: parseInt(directLineColMatch[2], 10),
+        hasLocation: true
+      };
+    }
+    
+    return { hasLocation: false };
+  };
+
+  // Format error message to highlight line/column information and make it clickable
+  const formatErrorMessage = (errorMessage) => {
+    if (!errorMessage) return "Error";
+    
+    const { hasLocation, line, column, value } = extractLineColumnInfo(errorMessage);
+    
+    if (hasLocation) {
+      // Create a unique ID for this error location element
+      const locationId = `err-loc-${line}-${column}-${Math.random().toString(36).substring(2, 9)}`;
+      
+      // Pattern to match any of the line/column formats we support
+      const lineColPatterns = [
+        /(at\s+)?line\s+(\d+),\s+column\s+(\d+)/i,
+        /(Runtime\s+Error(?:\s+at\s+line\s+|\s*\(?line\s*|\s+\(?line\s+)(\d+)(?:,\s*(?:col(?:umn)?\s*)?(\d+))?)/i,
+        /(at\s+)?line\s+(\d+)(?!\s*,\s*column)/i,
+        /(line:(\d+),\s*column:(\d+))/i
+      ];
+      
+      // Check each pattern and replace the first match
+      let highlighted = errorMessage;
+      let matchFound = false;
+      
+      for (const pattern of lineColPatterns) {
+        if (pattern.test(errorMessage)) {
+          // Replace the matched pattern with the highlighted span
+          highlighted = errorMessage.replace(
+            pattern,
+            `<span class="error-location" id="${locationId}" data-line="${line}" data-column="${column}">at line ${line}, column ${column}</span>`
+          );
+          matchFound = true;
+          break;
+        }
+      }
+      
+      // If no match was found but we know there's a location, add it at the end
+      if (!matchFound) {
+        highlighted = `${errorMessage} <span class="error-location" id="${locationId}" data-line="${line}" data-column="${column}">(at line ${line}, column ${column})</span>`;
+      }
+      
+      // Use a more reliable way to attach the click handler
+      setTimeout(() => {
+        const elem = document.getElementById(locationId);
+        if (elem) {
+          // Remove any existing click handlers to prevent duplicates
+          const newElem = elem.cloneNode(true);
+          elem.parentNode.replaceChild(newElem, elem);
+          
+          newElem.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            jumpToErrorLocation(line, column);
+          });
+          
+          // Add title for better UX
+          newElem.title = "Click to jump to this location in the editor";
+          
+          // Add visual indication that this is clickable
+          newElem.style.cursor = "pointer";
+        }
+      }, 10);
+      
+      return highlighted;
+    }
+    
+    return errorMessage;
+  };
+
   // Helper to format each individual error
   const renderErrorItem = (error, index) => {
-    let formattedMessage =
-      error.message && error.message !== 'Error' ? error.message : 'Error';
-
+    // For lexical errors, use the specialized formatter that better handles line/column information
+    let formattedMessage = error.type === 'lexical' && error.line !== undefined && error.column !== undefined 
+      ? formatLexerError(error) 
+      : (error.message && error.message !== 'Error' ? formatErrorMessage(error.message) : 'Error');
+    
     return (
-      <Box 
+      <Box
         key={`${error.type}-${index}`} 
-        sx={{ 
+        sx={{
           mb: 1.5,
           pb: 1.5,
           borderBottom: index < errors.length - 1 ? `1px solid ${theme.palette.divider}` : 'none'
@@ -206,31 +481,48 @@ const Errors = ({ errors, terminalOutput = '' }) => {
               sx={{
                 fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
                 fontWeight: 'medium',
-                mb: 0.5
+                mb: 0.5,
+                '& .error-location': {  // Enhanced styling for error location highlights
+                  fontWeight: 'bold',
+                  color: theme.palette.error.main,
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                  padding: '2px 4px',
+                  borderRadius: '3px',
+                  backgroundColor: theme.palette.mode === 'dark' 
+                    ? 'rgba(244, 67, 54, 0.15)' 
+                    : 'rgba(244, 67, 54, 0.08)',
+                  transition: 'all 0.2s',
+                  display: 'inline-block',
+                  margin: '0 2px',
+                  border: `1px dashed ${theme.palette.error.main}`,
+                  position: 'relative',
+                  '&:hover': {
+                    backgroundColor: theme.palette.mode === 'dark' 
+                      ? 'rgba(244, 67, 54, 0.35)' 
+                      : 'rgba(244, 67, 54, 0.25)',
+                    transform: 'scale(1.05)',
+                    fontWeight: 800,
+                    boxShadow: `0 0 4px ${theme.palette.error.main}`,
+                    textDecoration: 'underline'
+                  },
+                  '&::before': {
+                    content: '"⮞"',
+                    position: 'relative',
+                    marginRight: '3px',
+                    fontSize: '0.85em'
+                  }
+                }
               }}
-            >
-              {formattedMessage}
-              {error.line && error.column && (
-                <Box 
-                  component="span" 
-                  sx={{ 
-                    ml: 1, 
-                    fontWeight: 'normal',
-                    color: theme.palette.text.secondary,
-                    fontSize: '0.8rem'
-                  }}
-                >
-                  (Line {error.line}, Col {error.column})
-                </Box>
-              )}
-            </Typography>
+              dangerouslySetInnerHTML={{ __html: formattedMessage }}
+            />
 
-            {/* Unexpected tokens / expected tokens */}
-            {error.unexpected && (
+            {/* Keep the rest of the original code */}
+            {error.unexpected && !error.isEndOfInput && (
               <Box sx={{ pl: 1, fontSize: '0.85rem' }}>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
+                <Typography
+                  variant="body2"
+                  sx={{
                     color: theme.palette.text.secondary,
                     display: 'flex',
                     alignItems: 'center',
@@ -252,6 +544,18 @@ const Errors = ({ errors, terminalOutput = '' }) => {
                     }}
                   />
                 </Typography>
+                {(error.literals?.length > 0 || error.keywords?.length > 0 || error.symbols?.length > 0 || error.others?.length > 0) && (
+                  <Typography variant="body2" sx={{ color: theme.palette.text.secondary, mt: 0.5 }}>
+                    Expected tokens:
+                  </Typography>
+                )}
+                {renderExpectedCategories(error)}
+              </Box>
+            )}
+
+            {/* Display expected tokens for end of input errors without "unexpected token:" prefix */}
+            {error.isEndOfInput && error.unexpected && (
+              <Box sx={{ pl: 1, fontSize: '0.85rem' }}>
                 {(error.literals?.length > 0 || error.keywords?.length > 0 || error.symbols?.length > 0 || error.others?.length > 0) && (
                   <Typography variant="body2" sx={{ color: theme.palette.text.secondary, mt: 0.5 }}>
                     Expected tokens:
@@ -366,11 +670,13 @@ const Errors = ({ errors, terminalOutput = '' }) => {
                 theme.palette.success.main
             }}
           />
-          <Tab 
-            icon={<TerminalIcon fontSize="small" />} 
-            label="Terminal Output" 
-            iconPosition="start"
-          />
+          {debugMode && (
+            <Tab 
+              icon={<TerminalIcon fontSize="small" />} 
+              label="Terminal Output" 
+              iconPosition="start"
+            />
+          )}
         </Tabs>
       </Box>
 
@@ -456,14 +762,16 @@ const Errors = ({ errors, terminalOutput = '' }) => {
                     />
                   )}
                 </Box>
-                {errors.map((error, index) => renderErrorItem(error, index))}
+                {errors.map((error, index) => {
+                  return renderErrorItem(error, index);
+                })}
               </Box>
             )}
           </>
         )}
 
         {/* Terminal Output Tab Content */}
-        {tabIndex === 1 && (
+        {debugMode && tabIndex === 1 && (
           <Box 
             sx={{ 
               height: '100%',

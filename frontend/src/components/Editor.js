@@ -24,6 +24,10 @@ const CodeEditor = ({ code, setCode }) => {
     editorRef.current = editor;
     monacoRef.current = monacoInstance;
     
+    // Make editor globally available for error navigation
+    window.editor = editor;
+    window.monaco = monacoInstance;
+    
     monacoInstance.languages.register({ id: MINIMA });
     monacoInstance.languages.setMonarchTokensProvider(MINIMA, tokenizer);
     monacoInstance.languages.setLanguageConfiguration(MINIMA, languageConfiguration);
@@ -35,9 +39,41 @@ const CodeEditor = ({ code, setCode }) => {
     const initialTheme = theme.palette.mode === 'dark' ? 'myMinimaTheme' : 'myMinimaThemeLight';
     monacoInstance.editor.setTheme(initialTheme);
     
+    // Add custom CSS for error highlighting
+    const styleElement = document.createElement('style');
+    styleElement.textContent = `
+      .error-highlight-decoration {
+        background-color: ${theme.palette.mode === 'dark' ? 'rgba(255, 0, 0, 0.3)' : 'rgba(255, 0, 0, 0.15)'};
+        border: 1px solid ${theme.palette.mode === 'dark' ? 'rgba(255, 70, 70, 0.8)' : 'rgba(255, 0, 0, 0.6)'};
+        border-radius: 2px;
+      }
+      .error-inline-decoration {
+        color: ${theme.palette.error.main};
+        font-weight: bold;
+        text-decoration: wavy underline;
+        text-decoration-color: ${theme.palette.error.main};
+        animation: errorPulse 1.5s infinite;
+      }
+      @keyframes errorPulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.6; }
+        100% { opacity: 1; }
+      }
+    `;
+    document.head.appendChild(styleElement);
+    
     // Once mounted, load the built-in functions
     loadBuiltinFunctions(monacoInstance);
   };
+
+  // Clean up global references when component unmounts
+  useEffect(() => {
+    return () => {
+      // Cleanup global references when component unmounts
+      window.editor = undefined;
+      window.monaco = undefined;
+    };
+  }, []);
 
   // Separate function to load built-ins and update the editor
   const loadBuiltinFunctions = async (monacoInstance) => {

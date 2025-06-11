@@ -10,7 +10,7 @@ export const updateTokenizerWithBuiltins = (functions) => {
   console.log("Updating tokenizer with built-in functions:", builtinFunctionNames);
   
   // Include built-in functions in the keyword pattern rather than as a separate token type
-  const keywordPattern = 'var|get|show|integer|point|state|text|group|checkif|recheck|otherwise|switch|each|repeat|do|exit|next|fixed|func|throw|case|default|YES|NO|empty';
+  const keywordPattern = 'var|get|show|integer|point|state|text|group|checkif|recheck|otherwise|match|each|repeat|do|exit|next|fixed|func|throw|case|default|YES|NO|empty';
   
   // Combine regular keywords with the built-in function names
   const combinedKeywords = builtinFunctionNames.length > 0
@@ -56,7 +56,7 @@ export const tokenizer = {
       [/#[^\n]*/, 'comment'],
       [/[a-z_$][\w$]*/, {
         cases: {
-          'var|get|show|integer|point|state|text|group|checkif|recheck|otherwise|switch|each|repeat|do|exit|next|fixed|func|throw|case|default|YES|NO|empty': 'keyword',
+          'var|get|show|integer|point|state|text|group|checkif|recheck|otherwise|match|each|repeat|do|exit|next|fixed|func|throw|case|default|YES|NO|empty': 'keyword',
           '@default': 'identifier'
         }
       }],
@@ -75,7 +75,7 @@ export const tokenizer = {
   },
   keywords: [
     'var', 'get', 'show', 'integer', 'point', 'state', 'text', 'group',
-    'checkif', 'recheck', 'otherwise', 'switch', 'each', 'repeat',
+    'checkif', 'recheck', 'otherwise', 'match', 'each', 'repeat',
     'do', 'exit', 'next', 'fixed', 'func', 'throw', 'case', 'default',
     'YES', 'NO', 'empty'
   ],

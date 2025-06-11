@@ -225,12 +225,12 @@ export const provideCompletionItems = (monacoInstance) => {
           }
         },
         { 
-          label: 'switch', 
+          label: 'match', 
           kind: monacoInstance.languages.CompletionItemKind.Keyword, 
-          insertText: 'switch (${1:expression}) {\n\tcase ${2:value1}:\n\t\t${3:# code}\n\t\t${4:break;}\n\tdefault:\n\t\t${5:# code}\n}',
+          insertText: 'match (${1:expression}) {\n\tcase ${2:value1}:\n\t\t${3:# code}\n\tdefault:\n\t\t${5:# code}\n}',
           insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           documentation: {
-            value: getKeywordDocumentation('switch'),
+            value: getKeywordDocumentation('match'),
             isTrusted: true,
             supportThemeIcons: true,
             supportHtml: true
@@ -460,9 +460,9 @@ function getKeywordDocumentation(keyword) {
       description: 'Executes a code block if all previous conditions in a checkif/recheck chain are false. Similar to "else" in other languages.',
       example: 'checkif(x > 10) {\n\tshow("x is greater than 10");\n} otherwise {\n\tshow("x is not greater than 10");\n}'
     },
-    'switch': {
+    'match': {
       description: 'Selects one of several code blocks to execute based on a value.\nSimilar to python\'s match-case statement.',
-      example: 'switch(day) {\n\tcase "Monday":\n\t\tshow("Start of work week");\n\tcase "Friday":\n\t\tshow("End of work week");\n\tdefault:\n\t\tshow("Another day");\n}'
+      example: 'match(day) {\n\tcase "Monday":\n\t\tshow("Start of work week");\n\tcase "Friday":\n\t\tshow("End of work week");\n\tdefault:\n\t\tshow("Another day");\n}'
     },
     'each': {
       description: 'Loop structure for iterating over a range or collection. Similar to "for" in other languages.',
@@ -497,12 +497,12 @@ function getKeywordDocumentation(keyword) {
       example: 'func add(a, b) {\n\tthrow a + b;\n}\n\nvar result = add(5, 3); # result is 8'
     },
     'case': {
-      description: 'Defines a possible value in a switch statement.',
-      example: 'switch(day) {\n\tcase "Monday":\n\t\tshow("Start of week");\n\t\tbreak;\n}'
+      description: 'Defines a possible value in a match statement.',
+      example: 'match(day) {\n\tcase "Monday":\n\t\tshow("Start of week");\n}'
     },
     'default': {
-      description: 'Specifies the default case in a switch statement when no other cases match.',
-      example: 'switch(day) {\n\tcase "Monday":\n\t\tshow("Start of week");\n\t\tbreak;\n\tdefault:\n\t\tshow("Another day");\n}'
+      description: 'Specifies the default case in a match statement when no other cases match.',
+      example: 'match(day) {\n\tcase "Monday":\n\t\tshow("Start of week");\n\t\tdefault:\n\t\tshow("Another day");\n}'
     },
     'YES': {
       description: 'Logical value representing true. Used in state (boolean) expressions.',
