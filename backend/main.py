@@ -301,5 +301,6 @@ def get_builtin_functions():
     """Return the list of built-in function names for the editor highlighting"""
     builtin_functions = list(MinimaBultins.BUILTIN_FUNCTIONS.keys())
     return jsonify(builtin_functions)
-if __name__ == '__main__':
-    app.run(debug=True)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)

@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: minima-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m backend.main
+    envVars:
+      - key: PORT
+        value: 8000
